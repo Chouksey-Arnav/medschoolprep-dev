@@ -561,18 +561,27 @@ export default function App() {
     setCLoad(false);
   }
 
-  async function genDeck(){
-    if(!notes.trim()||gLoad)return;setGL(true);
-    const tid=toast.loading('Generating AI flashcards…');
-    try{
-      const raw=await callAI(`You are an MCAT flashcard generator. Return ONLY a JSON array of objects with "front" (question) and "back" (answer) string properties. No markdown, no preamble, no code blocks. Generate 10-14 high-yield MCAT flashcards.`,`Generate MCAT flashcards from these notes:\n\n${notes}`,1200);
-      const cards=JSON.parse(raw.replace(/```json|```/g,'').trim());
-      if(!Array.isArray(cards)||cards.length<3)throw new Error('Invalid response — try again');
-      const deckName=`AI Deck — ${new Date().toLocaleDateString()}`;
-      await saveDeck(deckName,cards);
-      setNotes('');setAD({name:deckName,cards,builtin:false});setCIdx(0);setFlip(false);
-      toast.dismiss(tid);toast.success(`Generated ${cards.length} flashcards!`);
-    }catch(e){toast.dismiss(tid);toast.error(`Generation failed: ${e.message.slice(0,80)}`);}
+  async function genDeck() {
+    if (!notes.trim() || gLoad) return;
+    setGL(true);
+    try {
+      const cleaned = cleanNotesText(notes);
+      const cards   = generateClozeFromNotes(cleaned, 14);
+      if (cards.length < 2) {
+        toast.error(`Not enough content to generate cards — paste more notes with complete sentences (minimum ~5 sentences).`);
+        setGL(false);
+        return;
+      }
+      const deckName = `Notes Deck — ${new Date().toLocaleDateString()}`;
+      await saveDeck(deckName, cards);
+      setNotes('');
+      setAD({ name: deckName, cards, builtin: false });
+      setCIdx(0);
+      setFlip(false);
+      toast.success(`Generated ${cards.length} flashcards instantly — no API used!`);
+    } catch (e) {
+      toast.error(e.message.slice(0, 80));
+    }
     setGL(false);
   }
 
