@@ -1,6 +1,6 @@
 // /api/openrouter.js — Vercel serverless function
-// Routes MetaBrain AI Coach through OpenRouter — Gemma 4 31B (free tier)
-// Fallback chain: Gemma 4 31B → Gemma 3 27B → Nemotron 3 Nano
+// Routes MetaBrain AI Coach through OpenRouter free tier
+// Fallback chain tries multiple models if one is unavailable
 // Rate limit: 40 requests per IP per hour
 
 const rateMap = new Map();
@@ -30,11 +30,12 @@ function sanitizeMessages(messages) {
     .slice(-24);
 }
 
-// Model priority list — Gemma 4 31B first, fallbacks if rate-limited or unavailable
+// Verified free models on OpenRouter — ordered by quality for MCAT tutoring
 const MODELS = [
-  'google/gemma-4-31b:free',
+  'google/gemini-flash-1.5-8b:free',
   'google/gemma-3-27b-it:free',
   'google/gemma-3-12b-it:free',
+  'meta-llama/llama-3.2-3b-instruct:free',
 ];
 
 export default async function handler(req, res) {
@@ -47,7 +48,7 @@ export default async function handler(req, res) {
   const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown')
     .split(',')[0].trim();
   if (isRateLimited(ip)) {
-    return res.status(429).json({ error: 'Rate limit reached. Please wait a moment before sending more messages.' });
+    return res.status(429).json({ error: 'Rate limit reached. Please wait before sending more messages.' });
   }
 
   const OR_KEY = process.env.OPENROUTER_KEY;
@@ -66,7 +67,9 @@ export default async function handler(req, res) {
   if (!message && !rawMessages) return res.status(400).json({ error: 'No message provided.' });
 
   let openaiMessages = [];
-  if (system) openaiMessages.push({ role: 'system', content: String(system).slice(0, 2000) });
+  if (system) {
+    openaiMessages.push({ role: 'system', content: String(system).slice(0, 2000) });
+  }
   if (rawMessages) {
     const cleaned = sanitizeMessages(rawMessages);
     if (cleaned) openaiMessages.push(...cleaned);
@@ -74,7 +77,10 @@ export default async function handler(req, res) {
     openaiMessages.push({ role: 'user', content: String(message).slice(0, 4000) });
   }
 
-  if (openaiMessages.length === 0 || (openaiMessages.length === 1 && openaiMessages[0].role === 'system')) {
+  if (
+    openaiMessages.length === 0 ||
+    (openaiMessages.length === 1 && openaiMessages[0].role === 'system')
+  ) {
     return res.status(400).json({ error: 'No valid messages to send.' });
   }
 
@@ -88,7 +94,7 @@ export default async function handler(req, res) {
           'Content-Type':  'application/json',
           'Authorization': `Bearer ${OR_KEY}`,
           'HTTP-Referer':  'https://medschoolprep.vercel.app',
-          'X-Title':       'MedSchoolPrep — MetaBrain Coach',
+          'X-Title':       'MedSchoolPrep MetaBrain Coach',
         },
         body: JSON.stringify({
           model,
@@ -98,30 +104,28 @@ export default async function handler(req, res) {
         }),
       });
 
-      // If rate-limited or service unavailable, try next model
       if (response.status === 429 || response.status === 503 || response.status === 502) {
-        console.warn(`Model ${model} returned ${response.status}, trying fallback…`);
+        console.warn(`[openrouter] Model ${model} returned ${response.status}, trying next…`);
         continue;
       }
 
       const data = await response.json();
 
       if (!response.ok) {
-        const errMsg = data?.error?.message || `OpenRouter error (${response.status})`;
-        console.error('OpenRouter API error:', errMsg, 'model:', model);
+        console.error(`[openrouter] Error from ${model}:`, data?.error?.message);
         continue;
       }
 
       const content = data?.choices?.[0]?.message?.content;
       if (!content) {
-        console.warn(`Empty response from model ${model}, trying fallback…`);
+        console.warn(`[openrouter] Empty content from ${model}, trying next…`);
         continue;
       }
 
       return res.status(200).json({ content, model_used: model });
 
     } catch (err) {
-      console.error(`Error with model ${model}:`, err.message);
+      console.error(`[openrouter] Exception with ${model}:`, err.message);
       continue;
     }
   }
