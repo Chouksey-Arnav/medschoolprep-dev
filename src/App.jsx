@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+// ADD THESE two lines after the existing import { ACHIEVEMENTS, checkAchievements } line:
+import { generateClozeFromNotes, cleanNotesText } from './lib/clozeGenerator';
+import { scoreMmiResponse } from './lib/mmiScorer';import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import {
