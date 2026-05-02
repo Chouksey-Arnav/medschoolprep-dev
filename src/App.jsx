@@ -584,18 +584,22 @@ export default function App() {
     }
     setGL(false);
   }
-
-  async function getMMIFb(){
-    if(!mAns.trim()||mLoad)return;setML(true);setMF('');
-    const q=fMmi[mIdx];const tid=toast.loading('Analyzing your response…');
-    try{
-      const fb=await callAI(`You are an experienced medical school admissions interviewer and MMI coach. Evaluate this MMI response on 5 dimensions. Format EXACTLY as:\n**Structure:** X/10 — [one line]\n**Content:** X/10 — [one line]\n**Empathy:** X/10 — [one line]\n**Communication:** X/10 — [one line]\n**Overall:** X/10 — [one line]\n\n[2-3 sentence overall feedback paragraph with specific improvement suggestion]`,`MMI Question Type: ${q.type}\nQuestion: ${q.q}\n\nStudent Response (${fmtT(mTimer)} elapsed):\n${mAns}`,700);
-      setMF(fb);
-      await DB.recordMMISession(mIdx);
-      const newMmi=mmiCount+1;setMmiCount(newMmi);
-      checkAndUnlockAchievements(user,qTaken,qHistory.filter(q=>q.score===100).length,streak,totalReviews,newMmi,mastery,aiChatCount);
-      toast.dismiss(tid);toast.success('AI feedback ready!');
-    }catch(e){toast.dismiss(tid);toast.error(e.message.slice(0,80));setMF(`AI feedback unavailable: ${e.message}`);}
+async function getMMIFb() {
+    if (!mAns.trim() || mLoad) return;
+    setML(true);
+    setMF('');
+    const q = fMmi[mIdx];
+    // Pure JS scoring — instant, no API, no cost, works offline
+    const { feedbackText } = scoreMmiResponse(mAns, q, mTimer);
+    setMF(feedbackText);
+    await DB.recordMMISession(mIdx);
+    const newMmi = mmiCount + 1;
+    setMmiCount(newMmi);
+    checkAndUnlockAchievements(
+      user, qTaken, qHistory.filter(q => q.score === 100).length,
+      streak, totalReviews, newMmi, mastery, aiChatCount
+    );
+    toast.success(`Feedback scored instantly — zero API!`, { icon: '◈', duration: 2000 });
     setML(false);
   }
 
