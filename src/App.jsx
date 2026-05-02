@@ -532,11 +532,20 @@ export default function App() {
   },[user?.xp]);
 
   // ── AI ────────────────────────────────────────────────────────────────────────
-  async function callAI(sys,msg,toks=700,hist=null){
-    const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({system:sys,message:msg,messages:hist,maxTokens:toks})});
-    const d=await r.json();
-    if(!r.ok){const m=d?.error||'';if(r.status===429)throw new Error('Rate limit reached. Please wait a moment.');if(r.status===500&&m.includes('not configured'))throw new Error(AI_MSG);throw new Error(m||`Error ${r.status}`);}
-    return d.content||'';
+  async function callAI(sys, msg, toks = 900, hist = null) {
+    const r = await fetch('/api/openrouter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system: sys, message: msg, messages: hist, maxTokens: toks }),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      const m = d?.error || '';
+      if (r.status === 429) throw new Error('Rate limit reached. Please wait a moment.');
+      if (r.status === 500 && m.includes('not configured')) throw new Error('Add OPENROUTER_KEY to Vercel environment variables.');
+      throw new Error(m || `Error ${r.status}`);
+    }
+    return d.content || '';
   }
 
   async function sendChat(message){
