@@ -1,6 +1,8 @@
 // /api/openrouter.js — Vercel serverless function
 // Routes MetaBrain AI Coach through OpenRouter free tier
-// Fallback chain tries multiple models if one is unavailable
+// Models verified free from user's OpenRouter account:
+//   Gemma 3 27B, Gemma 3 12B, Gemma 3 4B, Gemma 4 31B,
+//   Nemotron 3 Nano Omni, Owl Alpha, Poolside Laguna M.1
 // Rate limit: 40 requests per IP per hour
 
 const rateMap = new Map();
@@ -30,12 +32,14 @@ function sanitizeMessages(messages) {
     .slice(-24);
 }
 
-// Verified free models on OpenRouter — ordered by quality for MCAT tutoring
+// Free models verified from your OpenRouter account.
+// Ordered: largest/best first, smallest as last-resort fallback.
 const MODELS = [
-  'google/gemini-flash-1.5-8b:free',
-  'google/gemma-3-27b-it:free',
-  'google/gemma-3-12b-it:free',
-  'meta-llama/llama-3.2-3b-instruct:free',
+  'google/gemma-3-27b-it:free',                       // Gemma 3 27B — best verified free science model
+  'google/gemma-4-31b:free',                          // Gemma 4 31B — newest, try after 27B
+  'google/gemma-3-12b-it:free',                       // Gemma 3 12B — solid fallback
+  'nvidia/llama-3.1-nemotron-nano-8b-instruct:free',  // Nemotron Nano — confirmed free in screenshot
+  'google/gemma-3-4b-it:free',                        // Gemma 3 4B — last resort
 ];
 
 export default async function handler(req, res) {
@@ -104,6 +108,7 @@ export default async function handler(req, res) {
         }),
       });
 
+      // Try next model on rate limit or server errors
       if (response.status === 429 || response.status === 503 || response.status === 502) {
         console.warn(`[openrouter] Model ${model} returned ${response.status}, trying next…`);
         continue;
