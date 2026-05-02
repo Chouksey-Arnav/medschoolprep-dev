@@ -1,3 +1,4 @@
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { generateClozeFromNotes, cleanNotesText } from './lib/clozeGenerator';
 import { scoreMmiResponse } from './lib/mmiScorer';
 import { AnimatePresence, motion } from 'framer-motion';
