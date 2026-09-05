@@ -106,6 +106,22 @@ app.all('/api/data/:resource', (req, res) => {
   return dataResource(req, res);
 });
 
+// Liveness probe, and deliberately the cheapest route in the file.
+//
+// There was no health endpoint at all, which is a gap worth more than it looks: an orchestrator
+// that is asked to health-check a path answers "unhealthy" the same way whether the app is
+// broken or the path simply does not exist, and an unhealthy container is withdrawn from the
+// load balancer. Traefik with no healthy backend answers every request — the whole site, not
+// just the API — with a plain-text 503 "no available server", which is exactly what a student
+// sees when there is nothing wrong with the application at all.
+//
+// It touches nothing: no Supabase, no mailer, no Groq. That is the point. A probe that calls a
+// dependency reports someone else's outage as this container's, and flaps the instance out of
+// the pool over a slow query. This answers only the question a liveness probe actually asks —
+// is this process up and routing? — and anything richer belongs in a separate readiness route
+// that is allowed to fail without taking the site down.
+app.all('/api/health', (req, res) => res.status(200).json({ ok: true, uptime: Math.round(process.uptime()) }));
+
 // Anything under /api that got this far has no handler. Without this it reaches the SPA
 // catch-all below, which answers an API call with index.html and a 200 — so the caller fails on
 // `res.json()` and reports a JSON parse error instead of the missing route it actually hit.
