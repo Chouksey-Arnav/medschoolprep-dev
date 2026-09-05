@@ -106,3 +106,6 @@ Priya
 Kingsway
 EFGH
 DACA
+coolify
+unparseable
+traefik

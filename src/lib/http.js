@@ -148,6 +148,13 @@ const MESSAGES = {
   offline:  "You're offline right now. Reconnect to Wi-Fi or your network and try again — nothing you typed was lost.",
   timeout:  "That took too long to come back. This is usually a slow or filtered network rather than anything wrong with your account — try again in a moment.",
   network:  "We couldn't reach MedSchoolPrep just now. If you're on a school or work network, it may be filtering the connection; otherwise try again in a moment.",
+  // 502/503/504 from the edge: the request reached MedSchoolPrep's front door and
+  // found nothing behind it. That is a deploy in progress, a container that has
+  // not come up, or one that fell over — always our side, never the student's,
+  // and the one thing they must not be told is to go and check their Wi-Fi.
+  unavailable: "MedSchoolPrep is temporarily unavailable — this is on our side, not yours, and it's usually a few minutes while an update finishes. Nothing you typed was lost; try again shortly.",
+  // Keyed with the hyphen because that is the `reason` string produced below.
+  'rate-limited': "You've made a lot of requests in a short time, so MedSchoolPrep is asking you to slow down for a moment. Wait a minute and try again — nothing is wrong with your account.",
   blocked:  "Something on this network answered instead of MedSchoolPrep — usually a school filter, a guest Wi-Fi sign-in page, or a VPN. Try a different network, or ask whoever manages this one to allow medschoolprep.cloud.",
   server:   "MedSchoolPrep's servers had a problem with that request. It isn't something you did — try again in a moment, and contact support if it keeps happening.",
 };
@@ -273,6 +280,31 @@ export async function apiFetch(path, {
         throw new ApiNetworkError(MESSAGES.blocked, 'blocked', { retryable: false, status: res.status });
       }
 
+      // ── The last retry of a gateway status is still a gateway status ───────
+      //
+      // Above, a 502/503/504 is treated as a transport failure and retried. On
+      // the FINAL attempt that branch is skipped (`i < retries` is false) and the
+      // response fell through to here, to be returned to the caller as though it
+      // were an ordinary answer from a handler.
+      //
+      // It is not one, and the caller has no way to tell. Coolify's Traefik
+      // answers an application with no running container as
+      //
+      //     HTTP/2 503, content-type: text/plain, body: "no available server"
+      //
+      // which is not JSON and not HTML — so `looksLikeInterception` correctly
+      // says no, `parseJson` then failed on `JSON.parse("no available server")`,
+      // and the student was shown the `network` copy: "if you're on a school or
+      // work network, it may be filtering the connection." The app was telling
+      // people to go and argue with their IT department about a filter, at the
+      // exact moment its own container was not running.
+      //
+      // The edge already told us whose fault it is. Say so.
+      if (RETRYABLE_STATUSES.has(res.status)) {
+        const reason = res.status === 429 ? 'rate-limited' : 'unavailable';
+        throw new ApiNetworkError(MESSAGES[reason], reason, { retryable: true, status: res.status });
+      }
+
       return res;
     } catch (err) {
       if (err instanceof ApiNetworkError) throw err;
@@ -313,8 +345,19 @@ export async function parseJson(res) {
   try {
     return JSON.parse(text);
   } catch {
-    // JSON content-type, unparseable body: a truncated response, which is a
-    // transport problem however it is labeled.
+    // Unparseable body. WHOSE problem it is depends on the status, and getting
+    // that wrong is how a student ends up blamed for an outage.
+    //
+    // 502/503/504 — the edge answered, the app did not. Ours, definitively.
+    // Other 5xx — the handler answered and its body did not survive. Also ours.
+    // 2xx/4xx — a truncated response, which is a transport problem however it
+    //           is labeled, and the original `network` reading is right.
+    if (RETRYABLE_STATUSES.has(res.status) && res.status !== 429) {
+      throw new ApiNetworkError(MESSAGES.unavailable, 'unavailable', { retryable: true, status: res.status });
+    }
+    if (res.status >= 500) {
+      throw new ApiNetworkError(MESSAGES.server, 'server', { retryable: true, status: res.status });
+    }
     throw new ApiNetworkError(MESSAGES.network, 'network', { retryable: true, status: res.status });
   }
 }
