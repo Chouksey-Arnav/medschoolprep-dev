@@ -35,10 +35,25 @@ COPY . .
 # browser); the service-role key is a runtime-only secret and must never be an
 # ARG. Unset is a supported state: GOOGLE_OAUTH_CONFIGURED goes false and the
 # Google button shows a friendly error instead of crashing (src/lib/supabaseClient.js).
+#
+# VITE_RECAPTCHA_SITE_KEY belongs to the same set, and leaving it out did not merely turn
+# reCAPTCHA off — it locked everyone out. The two halves are designed to switch on together
+# (see the comments in src/lib/recaptcha.js and api/_lib/recaptcha.js): the client sends a
+# token only when it has a site key, and the server demands one only when RECAPTCHA_SECRET_KEY
+# is set. RECAPTCHA_SECRET_KEY is a RUNTIME variable, so Coolify hands it to the container and
+# it takes effect immediately. The site key is a BUILD variable, and without an ARG for it here
+# there was no way for it to reach the bundle — setting it in Coolify did nothing at all.
+#
+# So the moment the secret was set in Coolify, the halves came apart: the browser had no key,
+# sent no token, and verifyRecaptcha() rejected it for the missing token. Every signup,
+# password reset, email-code sign-in and password login returned
+# 400 "Could not verify you're not a robot", to real students, with no bot anywhere in it.
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
+ARG VITE_RECAPTCHA_SITE_KEY
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
-    VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+    VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY \
+    VITE_RECAPTCHA_SITE_KEY=$VITE_RECAPTCHA_SITE_KEY
 
 RUN npm run build
 
