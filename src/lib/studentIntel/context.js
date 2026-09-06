@@ -61,8 +61,10 @@ export function directionChanges(interestHistory = []) {
     }));
 }
 
-/** Recommendation feedback items a coach must NOT keep re-suggesting. */
-const SUPPRESS_STATUSES = new Set(['declined', 'not_interested', 'too_difficult', 'too_expensive', 'too_far_away', 'no_longer_eligible']);
+/** Recommendation feedback items a coach must NOT keep re-suggesting. Exported because the master
+ *  plan generator applies the same suppression list (src/lib/masterPlanGenerator.js) — two copies
+ *  would drift, and the copy that fell behind would keep scheduling something already refused. */
+export const SUPPRESS_STATUSES = new Set(['declined', 'not_interested', 'too_difficult', 'too_expensive', 'too_far_away', 'no_longer_eligible']);
 
 function schoolContextLines(schoolContext) {
   if (!schoolContext) return [];
@@ -114,7 +116,7 @@ export function buildStudentIntelBlock(intel = {}, taskType = 'general') {
     .map((r) => `${r.category || 'interest'}: "${r.interest}"${r.note ? ` (${trunc(r.note, 80)})` : ''}`);
   const changes = directionChanges(interestHistory);
   if (interestLines.length) sections.push(`Current stated interests (most recent statement per category — treat as superseding anything older): ${interestLines.join('; ')}.`);
-  if (changes.length) sections.push(`Direction has shifted over time in ${changes.map((c) => `${c.category} (from "${c.from}" to "${c.to}")`).join(', ')} — a real, normal signal of exploration, never a inconsistency to point out unless they ask about it.`);
+  if (changes.length) sections.push(`Direction has shifted over time in ${changes.map((c) => `${c.category} (from "${c.from}" to "${c.to}")`).join(', ')} — a real, normal signal of exploration, never an inconsistency to point out unless they ask about it.`);
 
   const schoolLines = schoolContextLines(schoolContext);
   if (schoolLines.length) sections.push(`School context: ${schoolLines.join(' ')}`);

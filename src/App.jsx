@@ -166,6 +166,7 @@ const NarrativeEnginePanel = React.lazy(() => import('./components/portfolio/ivy
 // so it is imported eagerly. store.js is a few hundred bytes and carries none
 // of the corpora — the weight is all behind the lazy boundary above.
 import { resetNarrativeCache } from './lib/ivy/store.js';
+import { invalidateStudentIntel } from './lib/studentIntel/store.js';
 // loadIntake/saveIntake/flushIntake are here for the course planner, which
 // writes the rigor counts it derives straight into the calculator's intake
 // rather than asking the same question a second time in different words.
@@ -4042,6 +4043,10 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
     PlanStore.resetPlanStore(); // drop the previous account's plan-push state with everything else
     resetIntakeCache();         // …and the Admissions Calculator's cached intake row, so a second
                                 // account on this browser never sees the first one's answers
+    invalidateStudentIntel();   // …and the tutoring surfaces' cached student-intelligence rows,
+                                // which hold a student's own words about their school, workload
+                                // and constraints — one account's must never be read into the
+                                // prompts of the next account signed in on this browser
     resetNarrativeCache();       // …and the Narrative Method Engine's cached inputs, for the same
                                  // reason and with more at stake: that row holds a student's
                                  // passion-project description and their Additional Information

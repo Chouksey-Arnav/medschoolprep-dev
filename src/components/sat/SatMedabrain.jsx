@@ -12,6 +12,9 @@ import { skillMeta, ERROR_TYPES } from '../../data/sat/taxonomy';
 import { strategyFor } from '../../data/sat/strategies';
 import { satGrad, satWash } from './satUi';
 import { aiLane } from '../../lib/aiLane';
+// Shared with the Prep panel — one cached load of the tutoring intel slice for both.
+// See src/lib/studentIntel/store.js.
+import { getStudentIntel } from '../../lib/studentIntel/store';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Medabrain, SAT branch.
@@ -141,6 +144,9 @@ export default function SatMedabrain({
     setInput('');
     setLoading(true);
     try {
+      // Never allowed to block a send: a failed intel load simply means the prompt goes out
+      // without the context block, exactly as it did before this existed.
+      const studentIntel = await getStudentIntel().catch(() => null);
       const system = buildSatSystemPrompt({
         user, gradeLabel, daysToExam,
         targetScore: user?.onboardingTargetScore || null,
@@ -154,6 +160,7 @@ export default function SatMedabrain({
         strategy: question ? strategyFor(question.skill) : null,
         answered, studentChoice, wasCorrect,
         recentActivitySummary,
+        studentIntel: studentIntel ? { ...studentIntel, gradeLabel } : null,
       });
       const res = await fetch('/api/groq', {
         method: 'POST',

@@ -801,6 +801,11 @@ export function buildPrepSystemPrompt({
   // three tracks in parallel than for somebody running one.
   parallelPathwaysSummary = null,
   safetyBlock = '',   // see buildCoachSystemPrompt
+  // See buildCoachSystemPrompt's `studentIntel` — same digest, rendered here with taskType
+  // 'tutoring', which is the slice that answers "why is this student's week shaped like this":
+  // their school's actual course offerings, the constraints they study under, and the most
+  // recent thing they said in their own words. Loaded by src/lib/studentIntel/store.js.
+  studentIntel = null,
 } = {}) {
   const base = `You are Medabrain, the Prep specialist inside MedSchoolPrep — the same coaching mind as the app's head Medabrain coach, sitting right next to ${user?.name || 'this student'} while they study so they can get help without leaving the lesson.
 
@@ -848,7 +853,9 @@ You are a real tutor with real subject knowledge — biology, chemistry, physics
     ? `\n\nRules: start from the lesson content above — explain it a different way, quiz them on it, clarify the part they're stuck on. When the lesson doesn't cover what they asked, TEACH IT ANYWAY from your own knowledge and say you're going beyond this lesson; do not tell them to go ask somewhere else. What you must not do is misattribute: never claim the lesson says something it doesn't, and never invent a takeaway or a note of theirs. When they explain something back to you or answer a question you asked, judge it honestly: if the understanding is wrong or half-right, say exactly which part is wrong before anything else — a student who is told "close enough!" learns the wrong thing and finds out on a test. Keep replies short and conversational — 2-4 sentences unless they explicitly ask to be quizzed or want a structured breakdown. Format with markdown: **bold** key terms, bullet lists only when genuinely helpful.${PERSONA_GUARDRAIL}`
     : `\n\nRules: help them figure out what to study next, using the real unit/progress data above — never invent a unit, lesson, or completion count that isn't listed. When asked "what should I do next" or "what's my progress," reference specific unfinished units, the weakest category, or due flashcards by name instead of generic advice. Anything they ask that isn't about their progress — a science question, a concept they half-remember, how something works — just answer it properly; you're a tutor. Keep replies short and concrete — 2-4 sentences, unless they explicitly ask for a full breakdown of their progress (then a short bullet list per unit is appropriate) or a study schedule (then a markdown table — day/unit/task columns — beats a wall of prose). Format with markdown sparingly.${PERSONA_GUARDRAIL}`;
 
-  return base + buildPersonalBriefBlock(user) + scopeBlock + highlightBlock + memoryBlock + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
+  return base + buildPersonalBriefBlock(user) + scopeBlock + highlightBlock + memoryBlock
+    + (studentIntel ? buildStudentIntelBlock(studentIntel, 'tutoring') : '')
+    + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
 }
 
 // ── Medabrain — SAT system prompt ─────────────────────────────────────────────
@@ -902,6 +909,10 @@ export function buildSatSystemPrompt({
   wasCorrect = null,
   recentActivitySummary = null,
   safetyBlock = '',   // see buildCoachSystemPrompt
+  // See buildPrepSystemPrompt's `studentIntel` — same digest, same 'tutoring' task type. The SAT
+  // specialist needs it for the same reason: "study three hours a night" is bad advice for a
+  // student who has told us they work shifts, and it is this block that says so.
+  studentIntel = null,
 } = {}) {
   const name = user?.name || 'this student';
   const base = `You are Medabrain, the SAT specialist inside MedSchoolPrep — a focused branch of Medabrain (the app's head AI coach) that only helps ${name} with the Digital SAT: the question in front of them, what to practice next, pacing, and how to actually move their score. You report up through the same coaching system Medabrain does, so the two must never contradict each other.
@@ -985,5 +996,7 @@ STATUS: ${answered
 
 Be straight about where they actually stand: if the gap between their measured range and their target is large, say how large and what it would realistically take, rather than telling them they are almost there. A student who is told they're fine at 40% mastery finds out on test day.${PERSONA_GUARDRAIL}`;
 
-  return base + buildPersonalBriefBlock(user) + dataBlock + questionBlock + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
+  return base + buildPersonalBriefBlock(user) + dataBlock + questionBlock
+    + (studentIntel ? buildStudentIntelBlock(studentIntel, 'tutoring') : '')
+    + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
 }
