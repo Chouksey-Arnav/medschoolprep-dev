@@ -28,7 +28,7 @@ function parseLooseJSON(text) {
   try { return JSON.parse(body.replace(/,\s*([}\]])/g, '$1')); } catch { return null; }
 }
 
-const EXTRACT_SYSTEM = `You extract structured facts from one short note a high-school student wrote about their own academic/extracurricular life. Read the note and return ONLY a JSON object (no prose, no markdown fence) with any of these keys you can confidently fill from what THEY wrote — omit any key you're not confident about, never guess or invent a value:
+const EXTRACT_SYSTEM = `You extract structured facts from one short note a high-school student wrote about their own academics and activities. Read the note and return ONLY a JSON object (no prose, no markdown fence) with any of these keys you can confidently fill from what THEY wrote — omit any key you're not confident about, never guess or invent a value:
 {
   "category": one of "activity" | "service" | "award" | "test_score" | "interest" | "reflection" | "school" | "other",
   "organization": string or null,
