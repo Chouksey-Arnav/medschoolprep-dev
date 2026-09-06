@@ -49,6 +49,7 @@ import {
 } from '../components/onboarding/Onboarding';
 import { deriveLoad } from './planGenerator';
 import { gradeStageFor } from './gradeBand';
+import { aiLane } from './aiLane.js';
 
 const labelOf = (opts, v) => opts.find(o => o.value === v)?.label || null;
 const labelsOf = (opts, arr) => (arr || []).map(v => labelOf(opts, v)).filter(Boolean);
@@ -640,7 +641,7 @@ async function callOracleOnce({ system, user, maxTokens, reasoningEffort }) {
     const r = await fetch('/api/groq', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ system, message: user, maxTokens, purpose: 'masterplan', tier: 'oracle', jsonMode: true, reasoningEffort }),
+      body: JSON.stringify({ system, message: user, maxTokens, purpose: 'masterplan', tier: 'oracle', jsonMode: true, reasoningEffort, lane: aiLane() }),
       signal: controller ? controller.signal : undefined,
     });
     if (!r.ok) {

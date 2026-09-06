@@ -38,6 +38,7 @@ import {
 } from '../lib/turnTaking';
 import VoiceSelector from './VoiceSelector';
 import VoiceConsentGate from './VoiceConsentGate';
+import { aiLane } from '../lib/aiLane';
 
 // A rotating pool of focus areas the interviewer can draw on — passed as *inspiration*, with an
 // explicit instruction to craft its own fresh questions and never repeat, so no two sessions feel
@@ -286,7 +287,7 @@ export default function LiveVoiceInterview({ accent = C.blue, pathwayLabel = 'Ge
     const r = await fetch('/api/groq', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ system: sessionRef.current.system, messages, maxTokens, reasoningEffort, purpose: 'interview' }),
+      body: JSON.stringify({ system: sessionRef.current.system, messages, maxTokens, reasoningEffort, purpose: 'interview', lane: aiLane() }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d?.error || `Error ${r.status}`);

@@ -379,6 +379,47 @@ export function addStudentItem(roadmap, { title, track = 'application', date = n
   return touch(roadmap, { items: [...allItems(roadmap), item] });
 }
 
+/**
+ * Accept a suggestion from outside the catalog, with the date the student went
+ * and found themselves.
+ *
+ * ── Why the date is a required argument and not an optional one ──────────────
+ * This is the seam where an un-dated suggestion becomes a dated commitment, and
+ * it is the exact point at which an invented deadline would enter the system if
+ * one ever could. It cannot: resolveSelection strips every date-shaped field
+ * from a suggestion before it reaches a student (see the beyondCatalog block in
+ * generator.js), so the only date available here is one a human typed. The item
+ * that comes out is `addedBy: 'student'` for that reason — it is theirs, it is
+ * exempt from catalog traceability, and it renders as an exact date because a
+ * student who looked something up is right about it.
+ *
+ * A null date is allowed and produces an undated item the roadmap keeps asking
+ * them to fill in — which is better than losing the suggestion because they
+ * could not find the deadline in the moment.
+ */
+export function addSuggestionAsItem(roadmap, suggestion, date = null) {
+  if (!suggestion?.name) return roadmap;
+  const note = [
+    suggestion.why,
+    suggestion.whereToLook ? `Where to confirm the date: ${suggestion.whereToLook}` : null,
+  ].filter(Boolean).join(' ');
+  const next = addStudentItem(roadmap, {
+    title: suggestion.org ? `${suggestion.name} (${suggestion.org})` : suggestion.name,
+    track: suggestion.track || 'competition',
+    date,
+    note,
+  });
+  // Stamp the provenance onto the item that was just appended. Worth recording:
+  // "Medabrain suggested this and you looked the date up" is a different kind of
+  // item from "you typed this in from nowhere", and the roadmap should be able
+  // to say which.
+  const items = allItems(next);
+  const added = items[items.length - 1];
+  return touch(roadmap, {
+    items: [...items.slice(0, -1), { ...added, fromSuggestion: true }],
+  });
+}
+
 export function removeItem(roadmap, itemId) {
   return touch(roadmap, { items: allItems(roadmap).filter((i) => i.id !== itemId) });
 }

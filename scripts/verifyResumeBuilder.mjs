@@ -30,7 +30,7 @@ import {
   CA_LIMITS, CA_CATEGORIES, commonAppCategory, inferTiming, compressText, composeDescription,
   buildCommonAppExport, buildActivitySlot, renderCommonAppText, renderResumeText, renderHonorsText,
   rankActivities, rankAwards, activityWeight, CATEGORY_MAP,
-} from '../src/lib/commonApp.js';
+} from '../src/lib/commonApp/activities.js';
 import {
   scoreActivity, activityIssues, coachDraft, analyzeSlate, slateInsights, honorsInsights,
   reactToActivity, reactToAward, totalHoursPerYear, PILLARS,

@@ -70,7 +70,8 @@ For instant file navigation, consult this quick index or `FILE_NAVIGATION.md`:
 | **SAT Question Bank** | `src/components/sat/SatLibraryPanel.jsx` | `src/lib/sat/aiPractice.js` | `src/data/sat/questions/index.js` | `scripts/auditSatBank.mjs` |
 | **Pathway Lessons** | `src/components/PrepMedabrain.jsx` | `src/lib/lessonAudio.js` | `src/data/lessonContent/index.js` | `scripts/auditLessonsCompleteness.mjs` |
 | **Verification Quizzes** | `src/components/QuizRecommendationsPanel.jsx` | `src/lib/quizPersonalization.js` | `src/data/quizzes/index.js` | `scripts/auditQuizBankBalance.mjs` |
-| **Common App Resume** | `src/components/ActivitiesResumePanel.jsx` | `src/lib/commonApp.js` | `src/data/constants.js` | `scripts/verifyResumeBuilder.mjs` |
+| **Common App Resume** | `src/components/ActivitiesResumePanel.jsx` | `src/lib/commonApp/activities.js` | `src/data/constants.js` | `scripts/verifyResumeBuilder.mjs` |
+| **Common App Mirror & Sync** | `src/components/portfolio/CommonAppMirror.jsx`, `CommonAppMirrorBadge.jsx` | `src/lib/commonApp/` (`sections`, `derive`, `sync`) | — (ledger rides the user record) | `scripts/verifyCommonApp.mjs` |
 | **Milestones & Roadmaps** | `src/components/PortfolioMilestones.jsx` | `src/lib/roadmap/generator.js` | `supabase/migrations/0015_roadmaps.sql` | `scripts/verifyRoadmap.mjs` |
 | **Parent Dashboard** | `src/components/parent/ParentApp.jsx` | `src/lib/parentApi.js` | `supabase/migrations/0006_parent_dashboard.sql` | `scripts/verifyParentDashboard.mjs` |
 | **AI Routing & Groq** | `src/components/MedabrainLauncher.jsx` | `api/groq.js` | `GROQ_SETUP.md` | `scripts/verifyMedabrainModes.mjs` |

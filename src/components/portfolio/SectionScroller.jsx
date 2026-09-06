@@ -99,7 +99,7 @@ function Jumper({ sections, activeId, onJump, accent, isMobile, barRef }) {
 // One section: a header that is always on the page (so the page reads as a
 // table of contents even fully collapsed) and a body that renders only when
 // open.
-function SectionBlock({ s, open, onToggle, accent, isMobile, registerRef }) {
+function SectionBlock({ s, open, onToggle, accent, isMobile, registerRef, mirrorBadge }) {
   const col = s.color || accent;
   const locked = s.locked;
   return (
@@ -157,6 +157,11 @@ function SectionBlock({ s, open, onToggle, accent, isMobile, registerRef }) {
           paddingLeft: isMobile ? 12 : 16, paddingRight: isMobile ? 12 : 16,
           background: `linear-gradient(180deg,${tint(col, 0.035)},transparent 220px)`,
         }}>
+          {/* Which part of the real Common Application this section feeds, if any. Rendered
+              here rather than inside each panel so every scrolling page in the Portfolio gets
+              it without fifteen separate wirings — and so a page that feeds nothing shows
+              nothing, because mirrorBadge returns null for those. */}
+          {mirrorBadge ? mirrorBadge(s.id) : null}
           <div style={CC({ gap: 20 })}>{s.render()}</div>
         </div>
       )}
@@ -173,6 +178,15 @@ export default function SectionScroller({
   sections = [], summary = null, accent = C.blue, isMobile = false,
   focusId = null, focusNonce = 0, onFocusHandled = null, onSectionOpen = null,
   defaultOpenIds = null, onPrint = null, printLabel = 'Print everything',
+  /**
+   * (sectionId) => node — the Common App mirror strip for one section, or null.
+   *
+   * A render-prop rather than data because the badge needs the derived application and the sync
+   * ledger, and threading those through every panel that happens to use this component would put
+   * two props onto a dozen files that have no other reason to know the Common App exists. The
+   * owner of the state passes one function down instead.
+   */
+  mirrorBadge = null,
 }) {
   // Sections open on arrival. Normally none — the point of the page is that it
   // opens on its summary — but a two-section page whose first section IS the
@@ -278,7 +292,7 @@ export default function SectionScroller({
       <div style={CC({ gap: 12 })}>
         {sections.map(s => (
           <SectionBlock key={s.id} s={s} open={open.has(s.id)} onToggle={toggle}
-            accent={accent} isMobile={isMobile} registerRef={registerRef} />
+            accent={accent} isMobile={isMobile} registerRef={registerRef} mirrorBadge={mirrorBadge} />
         ))}
       </div>
     </div>

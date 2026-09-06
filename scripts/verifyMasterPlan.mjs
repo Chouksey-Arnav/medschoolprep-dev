@@ -589,7 +589,24 @@ assert('placeholder-level output counts as a failure, not a success',
 // The server has to give a plan build room to make several calls in a row, or it rate-limits its
 // own most important feature and every call after the first falls back.
 assert('rate limits are scoped per purpose, not one bucket for the whole app',
-  /MINUTE_LIMIT_BY_PURPOSE/.test(groqSrc) && /bucketKey\(ip, purpose\)/.test(groqSrc));
+  /MINUTE_LIMIT_BY_PURPOSE/.test(groqSrc) && /bucketKey\(subject, purpose\)/.test(groqSrc));
+// ── And per STUDENT, not per IP ─────────────────────────────────────────────
+// The per-purpose split above stops a plan build from exhausting the coach's budget. It does
+// nothing about the other half of the same bug: a budget keyed on the client IP is shared by
+// every student behind one school's NAT, so the eighth roadmap build on that network exhausted
+// the day for everyone on it and the server answered code:'daily_limit' — telling a student who
+// had never built one that they had used up their builds. `subjectFor` is what fixed that, and
+// the per-network ceiling is what keeps a client-supplied identity from being a way around your
+// own limit. Both are load-bearing; neither is meaningful without the other.
+assert('a budget is charged to the student when one identifies itself',
+  /function subjectFor\(ip, lane\)/.test(groqSrc) && /lane \? `u:\$\{lane\}` : `ip:\$\{ip\}`/.test(groqSrc),
+  'per-IP budgets are shared by every student behind one school network');
+assert('and a network ceiling still backstops a forged identity',
+  /IP_CEILING_MINUTE_FACTOR/.test(groqSrc) && /IP_CEILING_DAILY_FACTOR/.test(groqSrc)
+  && /shared_network_limit/.test(groqSrc),
+  'without a ceiling, minting a fresh lane per request escapes the limit entirely');
+assert('a network ceiling reports itself as a network ceiling, not as the student\'s own limit',
+  /shared_network_limit/.test(groqSrc) && !/code: 'daily_limit'[^}]*network/i.test(groqSrc));
 assert('plan generation gets a minute budget larger than a chat turn\'s', (() => {
   const m = groqSrc.match(/MINUTE_LIMIT_BY_PURPOSE = \{[^}]*masterplan:\s*(\d+)/);
   const base = groqSrc.match(/const MINUTE_LIMIT = (\d+)/);

@@ -9,6 +9,7 @@ import { C, glass2, pill, btn, btnSm, tint, R, CC } from '../lib/theme';
 import { renderMarkdown } from '../lib/renderMarkdown';
 import { buildLessonDifficultyPrompt, FEEDBACK_LABELS } from '../lib/lessonFeedback';
 import { helpResourcesFor } from '../lib/lessonResources';
+import { aiLane } from '../lib/aiLane';
 
 // ── "How did that land?" ──────────────────────────────────────────────────────
 //
@@ -112,6 +113,7 @@ export default function LessonDifficultyCheck({
               : 'This passage was too hard for me. Please explain it properly, from the start.',
           }],
           purpose: 'prep',
+          lane: aiLane(),
           // The long form is the deliverable here, not a chat turn — a truncated "deeper
           // passage" that stops mid-sentence is worse than not offering one.
           maxTokens: 1100,

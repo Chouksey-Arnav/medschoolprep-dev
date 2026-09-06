@@ -6,13 +6,24 @@
 // whole thing under plain Node with no bundler and no theme.
 import { ANCHORS } from './anchors.js';
 import { COMPETITIONS } from './competitions.js';
+import { COMPETITIONS_EXPANSION } from './competitionsExpansion.js';
 import { PROGRAMS } from './programs.js';
 import { AWARDS } from './awards.js';
 import { OPPORTUNITY_EXPANSION } from './expansion.js';
+import { REGIONAL_PROGRAMS } from './regionalPrograms.js';
 import { PRIORITY, TRACK_IDS } from './schema.js';
 
 export * from './schema.js';
-export { ANCHORS, COMPETITIONS, PROGRAMS, AWARDS, OPPORTUNITY_EXPANSION };
+export { ANCHORS, COMPETITIONS, COMPETITIONS_EXPANSION, PROGRAMS, AWARDS, OPPORTUNITY_EXPANSION, REGIONAL_PROGRAMS };
+
+/**
+ * The competition track, assembled. Split across two authoring files rather than
+ * one: competitions.js holds the original seventeen and competitionsExpansion.js
+ * the fifty-four that followed. The split is purely about file size — a
+ * seventy-entry literal is not reviewable in one sitting — and nothing
+ * downstream knows or cares which file an entry came from.
+ */
+export const ALL_COMPETITIONS = [...COMPETITIONS, ...COMPETITIONS_EXPANSION];
 
 /**
  * Every catalog entry, normalized.
@@ -22,7 +33,7 @@ export { ANCHORS, COMPETITIONS, PROGRAMS, AWARDS, OPPORTUNITY_EXPANSION };
  * means "no lead time needed". Authoring files stay readable and the consumers
  * never have to write `entry.effort ?? 'moderate'` at every call site.
  */
-export const ROADMAP_CATALOG = [...ANCHORS, ...COMPETITIONS, ...PROGRAMS, ...AWARDS, ...OPPORTUNITY_EXPANSION].map((e) => ({
+export const ROADMAP_CATALOG = [...ANCHORS, ...ALL_COMPETITIONS, ...PROGRAMS, ...AWARDS, ...OPPORTUNITY_EXPANSION, ...REGIONAL_PROGRAMS].map((e) => ({
   selectivity: 'open',
   effort: 'moderate',
   format: 'varies',

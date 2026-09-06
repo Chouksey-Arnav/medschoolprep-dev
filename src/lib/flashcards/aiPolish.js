@@ -21,6 +21,8 @@
 // dependency for flashcard generation to work.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { aiLane } from '../aiLane.js';
+
 export const AI_POLISH_MAX_CARDS = 40;
 const NOTES_EXCERPT_CHARS = 2000;
 const REQUEST_TIMEOUT_MS = 12000;
@@ -62,7 +64,7 @@ Rules: Only include a card in "edits" if you actually improved its wording (a ty
     const res = await fetch('/api/groq', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ system, message, tier: 'scout', purpose: 'prep', maxTokens: 3000 }),
+      body: JSON.stringify({ system, message, tier: 'scout', purpose: 'prep', maxTokens: 3000, lane: aiLane() }),
       signal: controller.signal,
     });
     if (!res.ok) return null;

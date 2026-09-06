@@ -46,7 +46,7 @@ export const SUBVIEWS = {
   portfolio: {
     state: 'portfolioView',
     default: 'overview',
-    ids: ['overview', 'resume', 'opportunities', 'applying', 'milestones'],
+    ids: ['overview', 'resume', 'opportunities', 'applying', 'commonapp', 'milestones'],
     // Eleven sub-tabs became five (see PORTFOLIO_SUBNAV in src/App.jsx for the
     // grouping and why). 'timeline' and 'deadlines' were two sibling tabs
     // showing two halves of the same calendar and are now 'milestones';

@@ -32,6 +32,7 @@ import { HONEST_MENTOR_STANCE, PROMPT_SECURITY_GUARDRAIL, getWhyMedicineLabel, g
 // The academic-integrity boundary is stated to the student in the workspace and to the model
 // here, out of the same source, so the two can never drift apart — see src/lib/aiPolicy.js.
 import { AI_POLICY_PROMPT_CLAUSE } from './aiPolicy';
+import { aiLane } from './aiLane.js';
 
 export function wordCount(text) {
   return (text || '').trim().split(/\s+/).filter(Boolean).length;
@@ -278,6 +279,7 @@ export async function critiqueEssay({ draft, system, signal = null }) {
       system,
       message: `Here is the full draft. Critique it now, following the required structure exactly.\n\n───────── DRAFT BEGINS ─────────\n${content}\n───────── DRAFT ENDS ─────────`,
       purpose: 'essay',
+      lane: aiLane(),
       tier: 'sage',
       maxTokens: 2200,
       temperature: 0.4, // low: a critique is a judgment, and sampling noise here reads as inconsistency the student will (rightly) stop trusting

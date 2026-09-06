@@ -18,6 +18,7 @@
 import { skillMeta } from '../../data/sat/taxonomy';
 import { strategyFor } from '../../data/sat/strategies';
 import { generateForSkill } from './aiPractice';
+import { aiLane } from '../aiLane.js';
 
 /**
  * Generate extra practice questions for one skill.
@@ -89,7 +90,7 @@ export async function hintForQuestion(question, { profile = null, signal } = {})
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal,
-      body: JSON.stringify({ system, message, purpose: 'sat', tier: 'guide', temperature: 0.5, maxTokens: 160 }),
+      body: JSON.stringify({ system, message, purpose: 'sat', tier: 'guide', temperature: 0.5, maxTokens: 160, lane: aiLane() }),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -134,7 +135,7 @@ export async function explainQuestion(question, chosenIndex, { profile = null, s
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal,
-      body: JSON.stringify({ system, message, purpose: 'sat', tier: 'guide', temperature: 0.4, maxTokens: 380 }),
+      body: JSON.stringify({ system, message, purpose: 'sat', tier: 'guide', temperature: 0.4, maxTokens: 380, lane: aiLane() }),
     });
     if (!res.ok) return null;
     const data = await res.json();

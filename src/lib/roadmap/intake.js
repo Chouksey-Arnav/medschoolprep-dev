@@ -1,16 +1,40 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// The Roadmap intake — thirteen questions, and not one more.
+// The Roadmap intake — fifteen questions, and not one more.
 //
-// ── Why there is a hard cap, and why it is thirteen ──────────────────────────
+// ── Why there is a hard cap, and why it is fifteen ───────────────────────────
 // This app already asks a student about thirty questions during onboarding.
 // Asking thirty more before they can see the thing they came for is how a
-// feature gets abandoned at question nine. Thirteen is roughly four minutes at a
-// teenager's pace, which is the most an unproven feature can spend before it has
-// shown any value.
+// feature gets abandoned at question nine. Fifteen is roughly four and a half
+// minutes at a teenager's pace, which is the most an unproven feature can spend
+// before it has shown any value.
 //
 // The cap is enforced structurally rather than by discipline: QUESTIONS below is
 // the complete set, MAX_QUESTIONS asserts its length, and scripts/verifyRoadmap.mjs
-// fails the build if it grows. Adding a fourteenth question means deleting one.
+// fails the build if it grows. Adding a sixteenth question means deleting one.
+//
+// ── Why it moved from thirteen to fifteen ────────────────────────────────────
+// Two questions were added together because they unlock the same class of
+// answer: the ones a roadmap cannot give without knowing WHERE a student is and
+// WHAT they are heading toward.
+//
+//   `homeZip` — a very large share of the best opportunities available to a high
+//   schooler are residency-restricted: state health-pipeline programs, AHEC
+//   summer placements, state medical society scholarships, regional science
+//   fairs that feed the national one. Without a state, every one of those is
+//   either omitted from the roadmap or offered to a student who cannot apply,
+//   and both are failures. It is OPTIONAL and always will be — this is a minor's
+//   home location, it never leaves the browser except as a two-letter state code
+//   in the generation prompt, and it resolves offline (see src/lib/geo/zip.js).
+//
+//   `intendedMajor` — the roadmap's whole job is choosing which of forty
+//   plausible things belong in one year, and a major is the cheapest, most
+//   honest statement of what a student's year should cohere around. It is a
+//   LEAN and never a filter, for the reasons in src/lib/geo/majors.js.
+//
+// Both were weighed against the cap rather than waved through it. The test each
+// had to pass is the one every question here passes: does the roadmap say
+// something materially different depending on the answer? For these two it does
+// — a different set of programs entirely.
 //
 // ── Why none of these duplicate onboarding ───────────────────────────────────
 // Every question here earns its place by being something the app CANNOT already
@@ -28,7 +52,7 @@
 // why they are worth the four minutes.
 //
 // ── Prefill is a first-class feature, not a convenience ──────────────────────
-// Nine of the thirteen carry a `prefill` that reads the user record and the
+// Ten of the fifteen carry a `prefill` that reads the user record and the
 // Portfolio and proposes an answer. A prefilled question renders as a confirmation
 // ("we think this is you — change it if not") rather than a blank, which is
 // faster to answer AND demonstrably reads as the app knowing them. `prefill`
@@ -37,9 +61,11 @@
 // confidently wrong roadmap.
 // ─────────────────────────────────────────────────────────────────────────────
 import { TRACK_IDS } from '../../data/roadmap/index.js';
+import { resolveZip, isValidZip } from '../geo/zip.js';
+import { MAJORS, MAJOR_BY_ID } from '../geo/majors.js';
 
 /** Hard cap. See the header — raising this is a product decision, not a tweak. */
-export const MAX_QUESTIONS = 13;
+export const MAX_QUESTIONS = 15;
 
 const yesNo = (yesLabel, noLabel, unsureLabel = 'Not sure') => ([
   { value: 'yes', label: yesLabel },
@@ -118,6 +144,31 @@ export const QUESTIONS = [
       return picked.length ? picked.slice(0, 3) : null;
     },
     prefillNote: 'Based on what you told us during setup.',
+  },
+  {
+    id: 'intendedMajor',
+    kind: 'single',
+    question: 'If you had to pick an undergraduate major today, what would it be?',
+    // The reassurance is load-bearing and goes first. A fifteen-year-old asked this question by an
+    // app about getting into medical school will assume the answer is being scored, and an anxious
+    // guess is a worse input than an honest one. It is also simply true: the AAMC's own published
+    // data has humanities majors admitted at a slightly higher rate than biology majors.
+    help: 'Medical schools do not care which major you pick — they care about the prerequisite courses and the MCAT, and they admit humanities majors at the same rate as biology majors. What this actually changes is which competitions and programs are worth your particular year, and which courses to take next year. Change it whenever you like.',
+    options: MAJORS.map((m) => ({ value: m.id, label: m.label, sublabel: m.sublabel })),
+    maps: (v) => ({ intendedMajor: v }),
+    prefill: (user) => {
+      // Onboarding's dream-role answer is the closest thing already on the record, and only a few
+      // of its values imply a major with any confidence. The ones that do not are deliberately
+      // absent rather than guessed at: a wrong prefill on this question would put a lean through
+      // the student's whole year that they never chose.
+      const map = {
+        researcher: 'biology', surgeon: 'biology', psychiatrist: 'psychology',
+        neurologist: 'neuroscience', nurse: 'nursing-allied', pa: 'nursing-allied',
+        publichealth: 'public-health', engineer: 'bme',
+      };
+      return map[user?.dreamRole] || null;
+    },
+    prefillNote: 'Guessed from the role you said you wanted — change it if that is not the plan.',
   },
   {
     id: 'weeklyHours',
@@ -217,6 +268,21 @@ export const QUESTIONS = [
       'Depends on the cost',
     ),
     gates: (v) => ({ canTravel: v === 'no' ? false : v === 'yes' ? true : null }),
+  },
+  {
+    id: 'homeZip',
+    kind: 'zip',
+    question: 'What is your ZIP code?',
+    // Two things a teenager deserves to be told before typing their home location into anything,
+    // and both are true of this one: what it buys them, and where it goes.
+    help: 'This is the single answer that unlocks the most opportunities, because a large share of the best ones are open only to residents of one state — state health-pipeline and AHEC summer programs, state medical society scholarships, the regional science fair that feeds the national one. Without it those are all invisible to your roadmap. It is worked out on your own device, never sent anywhere, and all your roadmap ever sees is the two-letter state. Skip it if you would rather.',
+    placeholder: '27514',
+    optional: true,
+    prefill: (user) => {
+      const z = user?.zip || user?.postalCode || null;
+      return z && isValidZip(z) ? String(z).trim().slice(0, 5) : null;
+    },
+    prefillNote: 'From your profile — change it if you have moved.',
   },
   {
     id: 'setting',
@@ -372,6 +438,25 @@ export function answersToGates(answers = {}) {
   out.interests = [...interests];
   out.selectivityStomach = answers.selectivityStomach || 'balanced';
   out.timeAppetite = out.timeAppetite || 'moderate';
+
+  // ── Where they are ─────────────────────────────────────────────────────────
+  // Resolved once, here, so nothing downstream re-parses a ZIP or has to know
+  // that ZIP prefixes are a thing. `place` is null whenever the student skipped
+  // the question or typed something unresolvable, and every consumer treats null
+  // as "we do not know where they live" rather than as a default location — see
+  // proximity() in src/lib/geo/zip.js for why guessing is worse than abstaining.
+  //
+  // The raw ZIP deliberately does NOT travel on this object. Downstream wants a
+  // state and a region; nothing wants five digits, and the surest way to keep a
+  // minor's home ZIP out of a generation prompt is for the prompt builder never
+  // to be handed it.
+  const place = resolveZip(answers.homeZip);
+  if (place) {
+    out.place = { state: place.state, stateName: place.stateName, region: place.region, regionLabel: place.regionLabel, nearbyStates: place.nearbyStates };
+    out.homeState = place.state;
+    out.homeRegion = place.region;
+  }
+
   return out;
 }
 
@@ -393,10 +478,20 @@ export function intakeToPromptText(answers = {}, { maxChars = 2400 } = {}) {
       rendered = q.options?.find((o) => o.value === v)?.label || v;
     } else if (q.kind === 'schools') {
       rendered = (v || []).join(', ');
+    } else if (q.kind === 'zip') {
+      // THE ZIP ITSELF IS NEVER PUT IN A PROMPT. It is a minor's home location
+      // and the model has no use for it: everything the roadmap reasons about —
+      // residency eligibility, regional programs, whether a thing is a bus ride
+      // away — is answerable from the state and the region, which is what this
+      // sends instead. An unresolvable ZIP contributes no line at all rather
+      // than a line saying we could not read it.
+      const place = resolveZip(v);
+      if (!place) return;
+      rendered = `${place.stateName} (${place.regionLabel})`;
     } else {
       rendered = String(v).slice(0, 900);
     }
-    lines.push(`- ${q.question} → ${rendered}`);
+    lines.push(`- ${q.kind === 'zip' ? 'Which state they live in' : q.question} → ${rendered}`);
   });
   if (!lines.length) return null;
   return `WHAT THEY TOLD THE ROADMAP INTAKE (their own answers, treat as ground truth about their life):\n${lines.join('\n')}`.slice(0, maxChars);
@@ -405,4 +500,22 @@ export function intakeToPromptText(answers = {}, { maxChars = 2400 } = {}) {
 /** The colleges the roadmap is being back-planned from, deduped and trimmed. */
 export function targetSchools(answers = {}) {
   return [...new Set((answers.targetSchools || []).map((s) => String(s).trim()).filter(Boolean))].slice(0, 6);
+}
+
+/**
+ * Where this student lives, at the only grain we can honestly claim — or null.
+ *
+ * The one accessor every consumer should use, so no other module ever has to
+ * know that the answer is stored as a ZIP or that resolving it can fail. Null is
+ * a normal answer (the question is optional) and means "do not say anything
+ * about location", never "assume somewhere".
+ */
+export function homePlace(answers = {}) {
+  return resolveZip(answers?.homeZip);
+}
+
+/** The stated major id, or 'undecided'. Never null, so scoring never branches on absence. */
+export function intendedMajor(answers = {}) {
+  const id = answers?.intendedMajor;
+  return MAJOR_BY_ID[id] ? id : 'undecided';
 }

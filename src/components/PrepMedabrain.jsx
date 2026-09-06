@@ -10,6 +10,7 @@ import { runSafetyPass } from '../lib/safety/pass';
 import CrisisResourceCard from './safety/CrisisResourceCard';
 import { renderMarkdown } from '../lib/renderMarkdown';
 import MedabrainLauncher from './MedabrainLauncher';
+import { aiLane } from '../lib/aiLane';
 
 const LESSON_SUGGESTIONS = [
   'Explain this a different way',
@@ -96,6 +97,9 @@ export default function PrepMedabrain({
         body: JSON.stringify({
           system: sys, messages: nextMsgs.slice(-10), purpose: 'prep', maxTokens: 1400,
           ...(safety.safetyTier ? { safetyTier: safety.safetyTier } : {}),
+          // Whose rate-limit budget this request spends. Without it every request from one
+          // school's NAT shares a single allowance — see src/lib/aiLane.js.
+          lane: aiLane(),
         }),
       });
       const data = await res.json().catch(() => ({}));

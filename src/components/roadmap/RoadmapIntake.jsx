@@ -4,12 +4,13 @@ import { ChevronLeft, ChevronRight, Check, Sparkles, Wand2, X, Info } from 'luci
 import { C, glass, glass2, btn, btnG, R, CC, tint, inp, accentFill, onTint, CONTROL_TRANSITION } from '../../lib/theme';
 import CollegeAutocomplete from '../CollegeAutocomplete';
 import { QUESTIONS, isAnswered, intakeProgress, buildPrefill, buildDefaults } from '../../lib/roadmap/intake';
+import { resolveZip } from '../../lib/geo/zip';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The thirteen-question intake, one question per screen.
+// The fifteen-question intake, one question per screen.
 //
 // ── Why one per screen and not a form ───────────────────────────────────────
-// The same thirteen questions in a scrolling form is a wall of inputs that reads
+// The same fifteen questions in a scrolling form is a wall of inputs that reads
 // as paperwork and gets abandoned. One at a time, each with its own reason for
 // existing printed underneath it, reads as a conversation — which is what it is,
 // and which is also what makes a student willing to answer the question about
@@ -20,11 +21,11 @@ import { QUESTIONS, isAnswered, intakeProgress, buildPrefill, buildDefaults } fr
 // student who has been through onboarding already knows how to drive this.
 //
 // ── Prefill is the whole trick ──────────────────────────────────────────────
-// Nine of the thirteen arrive already answered from the user record and the
+// Ten of the fifteen arrive already answered from the user record and the
 // Portfolio. A prefilled question shows its proposed answer selected, with a
 // small note saying where it came from, so answering it is one tap of
-// confirmation rather than a decision. In practice this turns thirteen questions
-// into about five real ones — while still showing the student every guess we
+// confirmation rather than a decision. In practice this turns fifteen questions
+// into about six real ones — while still showing the student every guess we
 // made, which is the part that keeps a wrong guess from silently becoming a
 // wrong roadmap.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ export default function RoadmapIntake({
 
   return (
     <div style={{ ...CC({ gap: 0 }) }}>
-      {/* Progress rail. Segments rather than a bar: thirteen is a countable
+      {/* Progress rail. Segments rather than a bar: fifteen is a countable
           number, and seeing exactly how many remain is the difference between
           "this is nearly over" and "this might go on forever". */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
@@ -220,6 +221,41 @@ function QuestionBody({ q, value, onChange, accent, isMobile }) {
   }
 
   if (q.kind === 'schools') return <SchoolPicker value={value} onChange={onChange} max={q.max || 6} accent={accent} placeholder={q.placeholder} />;
+
+  if (q.kind === 'zip') {
+    const text = typeof value === 'string' ? value : '';
+    const place = resolveZip(text);
+    // Three states, and the middle one matters most: five digits typed that resolve to nothing is
+    // the case where silence would leave a student staring at a box wondering whether it worked.
+    const typedEnough = text.replace(/\D/g, '').length >= 5;
+    return (
+      <div>
+        <input
+          value={text}
+          inputMode="numeric"
+          autoComplete="postal-code"
+          maxLength={10}
+          onChange={(e) => onChange(e.target.value.replace(/[^\d-]/g, '').slice(0, 10))}
+          placeholder={q.placeholder || '12345'}
+          aria-label="ZIP code"
+          style={inp({ fontSize: 18, fontFamily: C.FM, letterSpacing: 'calc(-0.17px + var(--msp-letter-spacing))', maxWidth: 220, textAlign: 'center' })}
+        />
+        <div style={{ fontSize: 12, color: place ? C.greenL : typedEnough ? C.amberL : C.t4, marginTop: 12, lineHeight: 1.5 }}>
+          {place
+            ? `${place.stateName} — your roadmap can now include ${place.stateName} programs and scholarships you have to live there to get.`
+            : typedEnough
+              ? "That is not a ZIP code we recognize. Check it, or skip this — everything else still works."
+              : 'Five digits. Skipping is fine; you will just see fewer local programs.'}
+        </div>
+        {/* Said again at the point of typing, not only in the help text above. A privacy promise
+            that appears only before the box is a promise made to someone who has not yet decided
+            whether to trust it. */}
+        <div style={{ fontSize: 10.5, color: C.t4, marginTop: 8, lineHeight: 1.5 }}>
+          Worked out on your device. Your roadmap only ever sees the state.
+        </div>
+      </div>
+    );
+  }
 
   if (q.kind === 'text') {
     const text = typeof value === 'string' ? value : '';
@@ -407,6 +443,14 @@ function renderAnswer(q, v) {
   if (q.kind === 'multi') return (v || []).map((val) => q.options?.find((o) => o.value === val)?.label || val).join(' · ');
   if (q.kind === 'single') return q.options?.find((o) => o.value === v)?.label || String(v);
   if (q.kind === 'schools') return (v || []).join(', ');
+  // The review screen shows the STATE rather than the ZIP. The student can still edit it (tapping
+  // the row reopens the input with their digits in it) — this is about what a summary screen puts
+  // on display, possibly over a shoulder, and the state is the part that actually answers the
+  // question of what their roadmap will now include.
+  if (q.kind === 'zip') {
+    const place = resolveZip(v);
+    return place ? `${place.stateName} · ${place.zip.slice(0, 3)}xx` : String(v || '');
+  }
   const text = String(v || '');
   return text.length > 180 ? `${text.slice(0, 180)}…` : text;
 }

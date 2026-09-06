@@ -85,6 +85,48 @@ const DAILY_LIMIT_BY_PURPOSE = { masterplan: 150, plan: 60, sat: 200, roadmap: 4
 function minuteLimitFor(purpose) { return MINUTE_LIMIT_BY_PURPOSE[purpose] || MINUTE_LIMIT; }
 function dailyLimitFor(purpose) { return DAILY_LIMIT_BY_PURPOSE[purpose] || DAILY_LIMIT; }
 
+// ── Who a budget belongs to, and the bug that made this necessary ────────────
+// Every budget above used to be keyed on the client IP alone. That is the wrong
+// unit for this product, and it produced the single most-reported failure in the
+// Roadmap tab: "it says it can't reach Medabrain."
+//
+// A roadmap build is five upstream calls. The per-IP daily allowance is forty.
+// Behind one school's NAT — or one household, or one library — every student
+// shares a single IP, so the eighth build of the day anywhere on that network
+// exhausted the budget for EVERYONE on it. The server then returned
+// code:'daily_limit', which the generator correctly treats as terminal (see
+// TERMINAL_CODES in src/lib/roadmap/generator.js), so the build aborted on its
+// first call, stamped itself degraded, and told the student their roadmap
+// builds were used up — when that particular student had never built one. The
+// per-minute bucket did the same thing faster: two students generating in the
+// same class period is eighty calls a minute against a limit of forty.
+//
+// So budgets are now keyed on the STUDENT when the caller identifies one, and
+// the IP becomes a much looser ceiling that exists only to stop a runaway client
+// or a scripted abuser. `lane` is the caller-supplied stable student id the
+// roadmap already sends for key-pinning (see STICKY_LANE_PURPOSES). It is not
+// authenticated, so it cannot be the ONLY guard — a forger could mint a fresh
+// lane per request and spend unbounded budget. The IP ceiling is what closes
+// that: distinct lanes on one network are individually fair and collectively
+// capped.
+//
+// The factors are deliberately asymmetric. The per-minute ceiling is tight
+// because a runaway loop is a per-minute phenomenon and no real network has six
+// students starting a build in the same sixty seconds. The daily ceiling is
+// loose because a school genuinely can have twenty students build a roadmap in a
+// day, and that is the exact use we want to serve rather than throttle.
+const IP_CEILING_MINUTE_FACTOR = 6;
+const IP_CEILING_DAILY_FACTOR = 20;
+
+/**
+ * The identity a budget is charged to: the student when we have one, else the
+ * network. Prefixed so a lane that happens to look like an IP can never collide
+ * with a real one.
+ */
+function subjectFor(ip, lane) {
+  return lane ? `u:${lane}` : `ip:${ip}`;
+}
+
 // ── Response cache ────────────────────────────────────────────────────────────
 // Many calls into this endpoint are near-identical across users/sessions (e.g. the quiz-
 // recommendation narration, or an interview-prep rubric explanation) — cache by a hash of
@@ -384,29 +426,30 @@ function keyOrderForThisRequest(purpose, { primary, fallback }, lane = null) {
   return [...orderedPrimary, ...fallback];
 }
 
-// One bucket per (ip, purpose) — see MINUTE_LIMIT_BY_PURPOSE above for why they are separate.
-const bucketKey = (ip, purpose) => `${ip}|${purpose}`;
+// One bucket per (subject, purpose) — see MINUTE_LIMIT_BY_PURPOSE above for why the purposes are
+// separate, and subjectFor() above for why the subject is the student rather than the network.
+const bucketKey = (subject, purpose) => `${subject}|${purpose}`;
 
-function isDailyLimited(ip, purpose) {
-  const key = bucketKey(ip, purpose);
+function isDailyLimited(subject, purpose, limit = dailyLimitFor(purpose)) {
+  const key = bucketKey(subject, purpose);
   const now = Date.now();
   const entry = dailyMap.get(key);
   if (!entry || now > entry.resetAt) {
     dailyMap.set(key, { count: 0, resetAt: now + DAILY_MS });
     return false;
   }
-  return entry.count >= dailyLimitFor(purpose);
+  return entry.count >= limit;
 }
 
-function getRequestsUsedToday(ip, purpose) {
-  const entry = dailyMap.get(bucketKey(ip, purpose));
+function getRequestsUsedToday(subject, purpose) {
+  const entry = dailyMap.get(bucketKey(subject, purpose));
   if (!entry) return 0;
   if (Date.now() > entry.resetAt) return 0;
   return entry.count;
 }
 
-function addRequestToday(ip, purpose) {
-  const key = bucketKey(ip, purpose);
+function addRequestToday(subject, purpose) {
+  const key = bucketKey(subject, purpose);
   const now = Date.now();
   const entry = dailyMap.get(key);
   if (!entry || now > entry.resetAt) {
@@ -418,17 +461,96 @@ function addRequestToday(ip, purpose) {
 
 // Returns 0 when the request is allowed, otherwise the milliseconds until this bucket resets —
 // so the 429 can tell the caller exactly how long to back off instead of leaving it to guess.
-function minuteLimitRetryMs(ip, purpose) {
-  const key = bucketKey(ip, purpose);
+//
+// `consume` is false for the IP-ceiling check, which must be able to ASK whether the network is
+// over its ceiling without itself spending a slot: charging both the student bucket and the
+// network bucket for one request would make every request cost two, and the ceiling would bite at
+// half its stated value.
+function minuteLimitRetryMs(subject, purpose, limit = minuteLimitFor(purpose), consume = true) {
+  const key = bucketKey(subject, purpose);
   const now = Date.now();
   const entry = minuteMap.get(key);
   if (!entry || now > entry.resetAt) {
-    minuteMap.set(key, { count: 1, resetAt: now + MINUTE_MS });
+    minuteMap.set(key, { count: consume ? 1 : 0, resetAt: now + MINUTE_MS });
     return 0;
   }
-  if (entry.count >= minuteLimitFor(purpose)) return Math.max(250, entry.resetAt - now);
-  entry.count += 1;
+  if (entry.count >= limit) return Math.max(250, entry.resetAt - now);
+  if (consume) entry.count += 1;
   return 0;
+}
+
+/**
+ * The whole budget verdict for one request, in one place, so the live path and the preflight
+ * probe below can never disagree about whether a call would be allowed.
+ *
+ * `charge` distinguishes the two callers: the live path spends a slot, the probe only looks. A
+ * probe that spent budget would make checking whether you can build a roadmap cost you a roadmap
+ * build, which is the joke version of the bug this whole change exists to fix.
+ *
+ * Returns null when the request may proceed, otherwise the exact { status, body } to send.
+ */
+function budgetVerdict(ip, lane, purpose, { charge = true } = {}) {
+  const subject = subjectFor(ip, lane);
+  const ipSubject = `ip:${ip}`;
+
+  // The student's own per-minute allowance.
+  const retryAfterMs = minuteLimitRetryMs(subject, purpose, minuteLimitFor(purpose), charge);
+  if (retryAfterMs) {
+    return {
+      status: 429,
+      retryAfterSec: Math.ceil(retryAfterMs / 1000),
+      body: {
+        code: 'minute_limit',
+        error: 'Too many requests. Please wait a moment before sending more messages.',
+        retryAfterMs,
+      },
+    };
+  }
+
+  // The network ceiling, checked only when a student was identified — without a lane the two
+  // buckets are the same bucket and this would double-charge.
+  if (lane) {
+    const ceilingMs = minuteLimitRetryMs(ipSubject, purpose, minuteLimitFor(purpose) * IP_CEILING_MINUTE_FACTOR, charge);
+    if (ceilingMs) {
+      return {
+        status: 429,
+        retryAfterSec: Math.ceil(ceilingMs / 1000),
+        body: {
+          code: 'shared_network_busy',
+          error: 'A lot of people on this network are asking Medabrain for something at once. Give it a minute.',
+          retryAfterMs: ceilingMs,
+        },
+      };
+    }
+  }
+
+  if (isDailyLimited(subject, purpose)) {
+    return {
+      status: 429,
+      body: {
+        code: 'daily_limit',
+        error: `Daily coaching limit reached (${dailyLimitFor(purpose)} requests). Try again tomorrow.`,
+        requestsRemaining: 0,
+        dailyLimit: dailyLimitFor(purpose),
+      },
+    };
+  }
+
+  if (lane && isDailyLimited(ipSubject, purpose, dailyLimitFor(purpose) * IP_CEILING_DAILY_FACTOR)) {
+    return {
+      status: 429,
+      body: {
+        // Deliberately NOT 'daily_limit'. That code means "you have used yours up", and telling a
+        // student who has never built a roadmap that they have used up their builds is the exact
+        // false statement this whole change was made to stop.
+        code: 'shared_network_limit',
+        error: 'This network has reached its shared daily limit for this feature. Your own allowance is untouched — it resets for the network tomorrow, or works straight away on another connection.',
+        requestsRemaining: 0,
+      },
+    };
+  }
+
+  return null;
 }
 
 // Most callers (chat-style coach/interview/portfolio turns) are fine with a 2500-char input cap.
@@ -529,19 +651,23 @@ export default async function handler(req, res) {
   //
   // The codes are a closed vocabulary — see TERMINAL_CODES in
   // src/lib/roadmap/generator.js, which is the consumer that acts on them.
-  if (!ALL_KEYS.length) {
-    return res.status(500).json({
-      code: 'not_configured',
-      error: 'Medabrain is not configured. Set GROQ_API_KEY (and optionally GROQ_API_KEY_2 / GROQ_API_KEY_3) in your environment variables.',
-    });
-  }
-
-  // ── Parse and validate body ────────────────────────────────────────────────
+  //
+  // The body is parsed BEFORE this guard rather than after, for one reason: the preflight probe
+  // below has to be able to answer "is anything configured?" with a normal probe response. If the
+  // guard ran first, the one deployment state a probe most needs to report would be the one state
+  // where the probe never runs.
   let body;
   try {
     body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
   } catch {
     return res.status(400).json({ error: 'Invalid JSON body.' });
+  }
+
+  if (!ALL_KEYS.length && body?.probe !== true) {
+    return res.status(500).json({
+      code: 'not_configured',
+      error: 'Medabrain is not configured. Set GROQ_API_KEY (and optionally GROQ_API_KEY_2 / GROQ_API_KEY_3) in your environment variables.',
+    });
   }
 
   const {
@@ -550,14 +676,68 @@ export default async function handler(req, res) {
     lane: rawLane,
   } = body || {};
 
-  // Which key lane this caller belongs to, for the purposes that pin a student to one account
-  // (currently only 'roadmap' — see STICKY_LANE_PURPOSES). It is an OPAQUE, CAPPED STRING and it
-  // is used for exactly one thing: choosing an index into an array of keys. It is never logged,
-  // never sent upstream, and never trusted for authorization — a caller who forges someone else's
-  // lane achieves nothing except being served by the other of two interchangeable Groq accounts.
-  // That is why this endpoint can keep taking a client-supplied value rather than requiring a
-  // session: the blast radius of a lie is zero.
+  // Which key lane this caller belongs to. An OPAQUE, CAPPED STRING identifying the student, used
+  // for exactly two things: choosing an index into an array of keys (see STICKY_LANE_PURPOSES),
+  // and deciding whose rate-limit budget this request spends (see subjectFor). It is never logged,
+  // never sent upstream, and never trusted for authorization.
+  //
+  // It is not authenticated, and the budget use above is written knowing that. A caller who
+  // forges someone else's lane achieves nothing: they are served by the other of two
+  // interchangeable Groq accounts, and they spend the budget of a student they have to already
+  // know the id of. A caller who mints a FRESH lane per request to escape their own limit is the
+  // real attack, and the per-network ceiling in budgetVerdict() is what answers it — which is why
+  // that ceiling must stay in place even though it is the thing that made shared school networks
+  // painful in the first place. It is now twenty times looser than one student's allowance rather
+  // than equal to it.
   const lane = typeof rawLane === 'string' && rawLane ? rawLane.slice(0, 64) : null;
+
+  // ── The preflight probe ────────────────────────────────────────────────────
+  // `{ probe: true, purpose }` asks "would a real call right now be allowed, and if not, why" and
+  // answers WITHOUT spending an upstream call or a slot of anyone's budget.
+  //
+  // It exists because of the shape of the failure it replaces. A roadmap build is five upstream
+  // calls with four attempts each; when the answer was going to be "no" for a reason no retry can
+  // change, the student found that out after ninety seconds of backoff sleeps, in the form of a
+  // roadmap that had quietly become the deterministic slate. Every cause the server already knows
+  // about before it dials — no key configured at all, the student's own daily allowance spent,
+  // the network's shared ceiling reached, a minute bucket that needs another forty seconds — is
+  // knowable in under a millisecond. Asking first turns a ninety-second mystery into an immediate
+  // sentence naming the actual cause.
+  //
+  // What it deliberately CANNOT tell you: whether the configured keys are valid and whether the
+  // account can reach the pinned model. Those are only knowable by dialing, so the probe reports
+  // them as unverified rather than implying a clean bill of health it has not earned.
+  if (body?.probe === true) {
+    const probePurpose = VALID_PURPOSES.has(rawPurpose) ? rawPurpose : 'coach';
+    const pool = keysForPurpose(probePurpose);
+    const probeSubject = subjectFor(ip, lane);
+    // charge:false — checking whether you can build a roadmap must not cost you a roadmap build.
+    // A deployment with no key at all outranks every budget question: there is nothing to spend.
+    const blocked = !ALL_KEYS.length
+      ? { body: { code: 'not_configured', error: 'Medabrain is not configured on this deployment. No API key is set, so nothing can be generated until one is.' } }
+      : budgetVerdict(ip, lane, probePurpose, { charge: false });
+    return res.status(200).json({
+      probe: true,
+      purpose: probePurpose,
+      // The single question a caller actually has.
+      ok: !blocked,
+      code: blocked ? blocked.body.code : null,
+      error: blocked ? blocked.body.error : null,
+      retryAfterMs: blocked?.body?.retryAfterMs ?? null,
+      // Configuration facts, so a developer reading this in a network tab can tell a missing key
+      // from a spent budget without guessing.
+      configured: ALL_KEYS.length > 0,
+      dedicatedKeys: pool.primary.length,
+      fallbackKeys: pool.fallback.length,
+      reliefConfigured: hasRelief(),
+      identity: lane ? 'student' : 'network',
+      requestsUsedToday: getRequestsUsedToday(probeSubject, probePurpose),
+      dailyLimit: dailyLimitFor(probePurpose),
+      // Stated rather than implied. See above.
+      verifies: ['configuration', 'budget'],
+      cannotVerify: ['key validity', 'model availability'],
+    });
+  }
 
   if (!message && !rawMessages) {
     return res.status(400).json({ error: 'No message provided.' });
@@ -568,6 +748,9 @@ export default async function handler(req, res) {
   // which is exactly how every existing caller behaves, so this stays backward compatible.
   const purpose = VALID_PURPOSES.has(rawPurpose) ? rawPurpose : 'coach';
   const keyPool = keysForPurpose(purpose);
+  // Whose allowance this request spends. The student when they identified themselves, the network
+  // otherwise — see subjectFor().
+  const budgetSubject = subjectFor(ip, lane);
 
   // Caller may still pin a tier; otherwise use the purpose's cost-appropriate default.
   const effectiveRawTier = rawTier || PURPOSE_DEFAULT_TIER[purpose] || 'guide';
@@ -761,41 +944,28 @@ Respond to the person before anything else. Acknowledge what they said, warmly a
       tier,
       purpose,
       tierLabel: TIER_LABELS[tier] || tier,
-      requestsUsedToday: getRequestsUsedToday(ip, purpose),
-      requestsRemaining: Math.max(0, dailyLimitFor(purpose) - getRequestsUsedToday(ip, purpose)),
+      requestsUsedToday: getRequestsUsedToday(budgetSubject, purpose),
+      requestsRemaining: Math.max(0, dailyLimitFor(purpose) - getRequestsUsedToday(budgetSubject, purpose)),
       dailyLimit: dailyLimitFor(purpose),
       cached: true,
     });
   }
 
-  // ── Per-minute rate limiting ───────────────────────────────────────────────
-  // `retryAfterMs` travels in the body as well as the standard Retry-After header, because the
-  // one caller that genuinely needs to wait and retry (plan generation) is a fetch() in the
-  // browser reading JSON, not an HTTP client that honors headers on its own.
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  // Per-minute and per-day, per student, with a per-network ceiling behind them — see
+  // budgetVerdict() and the note above subjectFor() for the shared-NAT failure this shape exists
+  // to fix. `retryAfterMs` travels in the body as well as the standard Retry-After header, because
+  // the callers that genuinely need to wait and retry (plan and roadmap generation) are fetch()
+  // calls in the browser reading JSON, not HTTP clients that honor headers on their own.
   //
-  // The two 429s below are different animals and the `code` says which. A minute
-  // limit clears on its own inside a minute and waiting is the correct response;
-  // a daily limit does not clear until tomorrow, and retrying it — which the
-  // roadmap generator did, four times a pass, five passes deep — is a minute and
-  // a half of the student's time spent proving something already known.
-  const retryAfterMs = minuteLimitRetryMs(ip, purpose);
-  if (retryAfterMs) {
-    res.setHeader('Retry-After', String(Math.ceil(retryAfterMs / 1000)));
-    return res.status(429).json({
-      code: 'minute_limit',
-      error: 'Too many requests. Please wait a moment before sending more messages.',
-      retryAfterMs,
-    });
-  }
-
-  // ── Check daily request limit ──────────────────────────────────────────────
-  if (isDailyLimited(ip, purpose)) {
-    return res.status(429).json({
-      code: 'daily_limit',
-      error: `Daily coaching limit reached (${dailyLimitFor(purpose)} requests). Try again tomorrow.`,
-      requestsRemaining: 0,
-      dailyLimit: dailyLimitFor(purpose),
-    });
+  // The 429s below are different animals and the `code` says which. A minute limit clears on its
+  // own inside a minute and waiting is the correct response; a daily limit does not clear until
+  // tomorrow, and retrying it — which the roadmap generator did, four times a pass, five passes
+  // deep — is a minute and a half of the student's time spent proving something already known.
+  const verdict = budgetVerdict(ip, lane, purpose);
+  if (verdict) {
+    if (verdict.retryAfterSec) res.setHeader('Retry-After', String(verdict.retryAfterSec));
+    return res.status(verdict.status).json(verdict.body);
   }
 
   // ── Call Groq API (with timeout + one retry on transient failure) ──────────
@@ -1090,9 +1260,13 @@ Respond to the person before anything else. Acknowledge what they said, warmly a
       console.warn(`possible prompt leak suppressed for purpose=${purpose}`);
       content = LEAK_REFUSAL;
     }
-    addRequestToday(ip, purpose);
+    // Charged to the student, and to the network's shared ceiling alongside them. Only successes
+    // are counted, which is what makes a day's allowance an allowance of ANSWERS rather than of
+    // attempts — a student whose build died on a vendor outage has not spent their day.
+    addRequestToday(budgetSubject, purpose);
+    if (lane) addRequestToday(`ip:${ip}`, purpose);
     if (cacheable) setCachedResponse(cacheKey, content, modelUsed);
-    const requestsUsedToday = getRequestsUsedToday(ip, purpose);
+    const requestsUsedToday = getRequestsUsedToday(budgetSubject, purpose);
     return res.status(200).json({
       content,
       model_used: modelUsed,

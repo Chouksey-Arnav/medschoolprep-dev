@@ -20,6 +20,7 @@ import { scrubThinking } from '../lib/interviewReply';
 import { rateStation } from '../lib/interviewFeedback';
 import { takeInterviewIntent } from '../lib/interviewIntent';
 import * as DB from '../lib/db';
+import { aiLane } from '../lib/aiLane';
 
 // The rubric itself — the seven-point MMI scale, the AAMC competencies, the band definitions —
 // lives in lib/interviewScore.js and is built by buildRubricPrompt() so the instruction the model
@@ -153,7 +154,7 @@ export default function InterviewPrepPanel({
       // Sized for the thinking as well as the words: on this model family, reasoning tokens come
       // out of the same allowance, and a budget cut to the length of the visible rating returns an
       // empty response (or, before api/groq.js was fixed, the raw deliberation).
-      body: JSON.stringify({ system, message: answer, maxTokens: 1400, tier: 'sage', purpose: 'interview' }),
+      body: JSON.stringify({ system, message: answer, maxTokens: 1400, tier: 'sage', purpose: 'interview', lane: aiLane() }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d?.error || `Error ${r.status}`);

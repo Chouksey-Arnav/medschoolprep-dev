@@ -17,7 +17,8 @@ When assigned a specific task, jump directly to the relevant files listed below:
 | **Verification Quizzes** | `src/components/QuizRecommendationsPanel.jsx` | `src/lib/quizPersonalization.js` | `src/data/quizzes/index.js` | `scripts/auditQuizBankBalance.mjs` |
 | **Ivy Engine & Portfolio Strategy** | `src/components/portfolio/ivy/NarrativeEnginePanel.jsx` | `src/lib/ivy/engine.js`, `holistic.js` | `src/data/ivy/tierCatalog.js` | `scripts/verifyIvyEngine.mjs` |
 | **Four-Year Course Strategy** | `src/components/prep/FourYearMap.jsx`, `CoursePlannerPanel.jsx` | `src/lib/fourYearMap.js`, `coursePlanner.js` | `src/data/lessonContent/courseStrategy.js` | `scripts/verifyFourYearMap.mjs` |
-| **Common App Resume & Activities** | `src/components/ActivitiesResumePanel.jsx` | `src/lib/commonApp.js`, `activityIntel.js` | `src/data/constants.js` | `scripts/verifyResumeBuilder.mjs` |
+| **Common App Resume & Activities** | `src/components/ActivitiesResumePanel.jsx` | `src/lib/commonApp/activities.js`, `activityIntel.js` | `src/data/constants.js` | `scripts/verifyResumeBuilder.mjs` |
+| **Common App Mirror & Portfolio Sync** | `src/components/portfolio/CommonAppMirror.jsx`, `CommonAppMirrorBadge.jsx` | `src/lib/commonApp/sections.js`, `derive.js`, `sync.js`, `useCommonApp.js` | — (ledger rides the user record) | `scripts/verifyCommonApp.mjs` |
 | **Portfolio Milestones & Roadmaps** | `src/components/PortfolioMilestones.jsx`, `PlansTab.jsx` | `src/lib/roadmap/generator.js`, `timeline.js` | `supabase/migrations/0015_roadmaps.sql` | `scripts/verifyTimeline.mjs`, `verifyRoadmap.mjs` |
 | **College & Scholarship Database** | `src/components/CollegeListPanel.jsx`, `ScholarshipDatabase.jsx` | `src/lib/collegeRecommend.js`, `scholarshipResearch.js` | `src/data/scholarships.js`, `opportunities.js` | `scripts/verifyOpportunities.mjs`, `verifyMedicalScholarships.mjs` |
 | **Mock Voice Interview Simulator** | `src/components/LiveVoiceInterview.jsx`, `InterviewPrepPanel.jsx` | `src/lib/speech.js`, `interviewScore.js` | `src/data/interviewQuestions.js`, `mmiCasperQuestions.js` | `scripts/verifyInterviewRealism.mjs` |
@@ -123,6 +124,7 @@ Below is the complete, itemized inventory of **every single file in the reposito
 - `src/lib/admissions/store.js` — Admissions intake and model processing logic for store.
 - `src/lib/ageGate.js` — Shared application utility / service for ageGate.
 - `src/lib/aiCache.js` — Shared application utility / service for aiCache.
+- `src/lib/aiLane.js` — Identifies the student to the AI rate-limit budgets, so one school's NAT does not share one allowance.
 - `src/lib/aiFlashcards.js` — Shared application utility / service for aiFlashcards.
 - `src/lib/aiPolicy.js` — Shared application utility / service for aiPolicy.
 - `src/lib/applicationStrength.js` — Shared application utility / service for applicationStrength.
@@ -135,12 +137,20 @@ Below is the complete, itemized inventory of **every single file in the reposito
 - `src/lib/coachContext.js` — Shared application utility / service for coachContext.
 - `src/lib/collegeRecommend.js` — Shared application utility / service for collegeRecommend.
 - `src/lib/combinedDegree.js` — Shared application utility / service for combinedDegree.
-- `src/lib/commonApp.js` — Shared application utility / service for commonApp.
+- `src/lib/commonApp/activities.js` — The Common App activities/honors export engine: category mapping, per-field limits, ranking.
+- `src/lib/commonApp/sections.js` — The real Common Application modelled section by section, with its actual field limits.
+- `src/lib/commonApp/derive.js` — Portfolio → Common App state. Derives what would go in each section; invents nothing.
+- `src/lib/commonApp/sync.js` — The Portfolio ↔ Common App ledger: what was copied across, and what has drifted since.
+- `src/lib/commonApp/useCommonApp.js` — The single React hook owning the derivation, the ledger and its debounced persistence.
+- `src/lib/commonApp/index.js` — Re-exports the four modules above as one import.
 - `src/lib/contentSearch.js` — Shared application utility / service for contentSearch.
 - `src/lib/cosmetics.js` — Shared application utility / service for cosmetics.
 - `src/lib/coursePlanner.js` — Shared application utility / service for coursePlanner.
 - `src/lib/credentials.js` — Shared application utility / service for credentials.
 - `src/lib/dailyCheckin.js` — Shared application utility / service for dailyCheckin.
+- `src/lib/dashboardStages.js` — Decides which Home dashboard modules appear, based on whether the data they measure exists yet.
+- `src/lib/geo/zip.js` — Offline ZIP-prefix → state/region resolver. No network, no key; a minor's ZIP never leaves the device.
+- `src/lib/geo/majors.js` — The intended-major taxonomy and its affinity scoring. A lean on the roadmap, never a filter.
 - `src/lib/dailyQuests.js` — Shared application utility / service for dailyQuests.
 - `src/lib/dataApi.js` — Shared application utility / service for dataApi.
 - `src/lib/dateUtils.js` — Shared application utility / service for dateUtils.
@@ -454,6 +464,7 @@ Below is the complete, itemized inventory of **every single file in the reposito
 - `src/data/nudgeBank.js` — Data catalog / static repository dataset for nudgeBank.
 - `src/data/opportunities.js` — Data catalog / static repository dataset for opportunities.
 - `src/data/opportunitiesExpansion.js` — Data catalog / static repository dataset for opportunitiesExpansion.
+- `src/data/opportunitiesCompetitions.js` — Browsable competition and regional-program entries added alongside the roadmap catalog expansion.
 - `src/data/opportunityPrograms.js` — Data catalog / static repository dataset for opportunityPrograms.
 - `src/data/opportunityProgramsExpansion.js` — Data catalog / static repository dataset for opportunityProgramsExpansion.
 - `src/data/pathwayFinance.js` — Data catalog / static repository dataset for pathwayFinance.
@@ -467,6 +478,8 @@ Below is the complete, itemized inventory of **every single file in the reposito
 - `src/data/roadmap/anchors.js` — Roadmap schema and catalog dataset for anchors.
 - `src/data/roadmap/awards.js` — Roadmap schema and catalog dataset for awards.
 - `src/data/roadmap/competitions.js` — Roadmap schema and catalog dataset for competitions.
+- `src/data/roadmap/competitionsExpansion.js` — 54 further competitions spanning research, writing, ethics, statistics, policy and robotics.
+- `src/data/roadmap/regionalPrograms.js` — State-restricted programs, surfaced once a student gives a ZIP code.
 - `src/data/roadmap/expansion.js` — Roadmap schema and catalog dataset for expansion.
 - `src/data/roadmap/index.js` — Roadmap schema and catalog dataset for index.
 - `src/data/roadmap/programs.js` — Roadmap schema and catalog dataset for programs.
@@ -607,6 +620,8 @@ Below is the complete, itemized inventory of **every single file in the reposito
 - `src/components/portfolio/ClinicalHoursSection.jsx` — Portfolio Hub React UI component for ClinicalHoursSection.
 - `src/components/portfolio/CombinedDegreePanel.jsx` — Portfolio Hub React UI component for CombinedDegreePanel.
 - `src/components/portfolio/CommonAppExport.jsx` — Portfolio Hub React UI component for CommonAppExport.
+- `src/components/portfolio/CommonAppMirror.jsx` — The whole real Common Application, section by section, with this student's Portfolio in it.
+- `src/components/portfolio/CommonAppMirrorBadge.jsx` — The strip on each Portfolio page naming which Common App section it feeds.
 - `src/components/portfolio/CredentialsSection.jsx` — Portfolio Hub React UI component for CredentialsSection.
 - `src/components/portfolio/EssayModeChat.jsx` — Portfolio Hub React UI component for EssayModeChat.
 - `src/components/portfolio/EssayVersionHistory.jsx` — Portfolio Hub React UI component for EssayVersionHistory.

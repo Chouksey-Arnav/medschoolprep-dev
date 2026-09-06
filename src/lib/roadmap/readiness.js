@@ -30,7 +30,7 @@
 // someone and the thing they came for has to justify every line of itself.
 //
 // Applying that rule is also what keeps this SHORT. Onboarding already asks
-// about thirty questions and the intake asks thirteen more; a third checklist
+// about thirty questions and the intake asks fifteen more; a third checklist
 // of ten items would be the third time this app has told a fifteen-year-old to
 // come back later. Five gates, four of which a normally-active account has
 // already satisfied without ever seeing this screen.

@@ -256,6 +256,24 @@ export const UNLOCK_RULES = [
     at: (s) => s.activities >= 1,
   },
   {
+    // ── Why the Common App mirror is gated at all ────────────────────────────
+    // It is the most useful screen in the Portfolio for a student who has
+    // something in their Portfolio, and one of the least useful for a student
+    // who does not. Shown on day one it is sixteen empty sections and a set of
+    // limits on writing that has not been written — which is a wall of
+    // obligations presented to someone who has not yet done anything, and the
+    // exact shape of overwhelm this ladder exists to prevent.
+    //
+    // One activity or one college is the right threshold rather than something
+    // higher: the moment there is a single real thing in the Portfolio, seeing
+    // where it lands on the real form is genuinely motivating, and that is much
+    // earlier than a student would find the screen on their own.
+    id: 'portfolio/commonapp',
+    label: 'Common App',
+    hint: 'Log one activity or add a college — then this shows exactly where it lands on the real form.',
+    at: (s) => s.activities >= 1 || s.colleges >= 1,
+  },
+  {
     id: 'portfolio/opportunities:tracked',
     label: 'What you\u2019re tracking',
     hint: 'Track a program or scholarship and it shows up here with its deadline.',

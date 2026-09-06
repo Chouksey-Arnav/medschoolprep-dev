@@ -65,6 +65,8 @@ const status = (n, doneAt) => (!n ? { tone: 'empty', label: 'Nothing yet' }
 export default function ApplyingPanel({
   accent = C.sky, isMobile = false, renders = {}, counts = {},
   sectionLocks = [], focusId = null, focusNonce = 0, onSectionOpen = null,
+  // (sectionId) => node — the Common App mirror strip. See SectionScroller's own prop.
+  mirrorBadge = null,
 }) {
   const lockFor = (id) => sectionLocks.find(l => l.id.split(':').pop() === id) || null;
   const colleges = counts.colleges || 0;
@@ -115,7 +117,7 @@ export default function ApplyingPanel({
         sub="Your program list and everything each program still needs from you — combined-degree programs, essays, aid, recommenders, interviews, and your real odds. One page, in the order you work through it." />
 
       <SectionScroller
-        accent={accent} isMobile={isMobile}
+        accent={accent} isMobile={isMobile} mirrorBadge={mirrorBadge}
         focusId={focusId} focusNonce={focusNonce} onSectionOpen={onSectionOpen}
         printLabel="Print this page"
         summary={{

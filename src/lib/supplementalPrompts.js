@@ -15,6 +15,7 @@
 // making a deadline decision needs to know which one they're looking at.
 // ─────────────────────────────────────────────────────────────────────────────
 import { getSupplementsFor, CYCLE_NOTE } from '../data/supplementalEssays';
+import { aiLane } from './aiLane.js';
 
 // confidence: 'curated' — from our hand-checked dataset, recent cycle
 //             'recalled' — Medabrain recognizes the school and is reproducing
@@ -83,6 +84,7 @@ export async function fetchSupplementPrompts(collegeName, { signal = null } = {}
       system: SYSTEM,
       message: `School: ${name}. Return its supplemental essay prompts as JSON, following the rules and shape you were given.`,
       purpose: 'essay',
+      lane: aiLane(),
       tier: 'sage',
       maxTokens: 1200,
       jsonMode: true,

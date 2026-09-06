@@ -9,6 +9,7 @@ import { calibrateFeedback, buildRubricPrompt } from './interviewScore';
 import { scrubThinking } from './interviewReply';
 import { getStationType } from './interviewPanel';
 import { STATION_FORMATS } from '../data/mmiStations';
+import { aiLane } from './aiLane.js';
 
 // Every framing ends the same way, and it is the sentence that keeps this appropriate for the
 // student who is actually using it. These are 14- to 18-year-olds previewing a format they will
@@ -84,7 +85,7 @@ async function askModel({ system, message, maxTokens, signal }) {
   const r = await fetch('/api/groq', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ system, message, maxTokens, purpose: 'interview', tier: 'sage' }),
+    body: JSON.stringify({ system, message, maxTokens, purpose: 'interview', tier: 'sage', lane: aiLane() }),
     signal,
   });
   const d = await r.json();

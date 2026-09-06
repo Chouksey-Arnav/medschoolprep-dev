@@ -55,10 +55,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { dayKey, daysBetween, shiftDays, effectiveGradeStage, GRADE_LABELS } from '../timeline.js';
 import { buildCandidateSlate, shortlistForPrompt, catalogEntry } from './catalog.js';
-import { answersToGates, intakeToPromptText, targetSchools } from './intake.js';
+import { answersToGates, intakeToPromptText, targetSchools, homePlace, intendedMajor } from './intake.js';
+import { MAJOR_BY_ID } from '../geo/majors.js';
 import { ROADMAP_VERSION, SEASON_COUNT, roadmapFingerprint, validateSlate, monthlyLoad } from './model.js';
 import { measure, rung, rungForOverage, squeeze, LAST_RUNG } from './promptBudget.js';
-import { TRACK_BY_ID } from '../../data/roadmap/index.js';
+import { TRACK_BY_ID, TRACK_IDS } from '../../data/roadmap/index.js';
 
 // ── Wire plumbing ────────────────────────────────────────────────────────────
 // Deliberately the same shape, retry policy and trace discipline as
@@ -112,6 +113,13 @@ export const TERMINAL_CODES = new Set([
   // The daily budget is spent. It does not come back before tomorrow, so the
   // remaining passes cannot succeed and neither can an immediate retry.
   'daily_limit',
+  // The NETWORK's shared daily ceiling, not this student's own allowance. Same
+  // terminal shape — it does not clear before tomorrow on this connection — but
+  // a completely different sentence, because telling a student who has never
+  // built a roadmap that they have used up their builds is a false statement
+  // about them rather than about their school's wifi. See budgetVerdict() in
+  // api/groq.js for the per-IP-bucket bug that made this distinction necessary.
+  'shared_network_limit',
 ]);
 
 /**
@@ -144,6 +152,16 @@ export const DEGRADED_REASONS = {
     title: 'You have used up today\'s roadmap builds.',
     detail: 'Building a year is the most expensive thing this app does, so there is a daily ceiling on it. This roadmap was assembled from the verified deadline catalog — real programs, real dates — and you can rebuild it properly tomorrow.',
     retryable: false,
+  },
+  shared_network_limit: {
+    title: 'This network has used up today\'s roadmap builds — not you.',
+    detail: 'Roadmap builds are budgeted per person, with a much larger shared ceiling for everyone on one connection, and that shared ceiling is what has been reached. Your own allowance is untouched: the same build usually works straight away on a phone off the school wifi, and the network\'s resets tomorrow. This roadmap was assembled from the verified deadline catalog in the meantime — real programs, real dates.',
+    retryable: false,
+  },
+  shared_network_busy: {
+    title: 'A lot of people on this network are asking Medabrain at once.',
+    detail: 'This is the shared per-minute ceiling for your connection rather than anything to do with your own account. It clears in under a minute — the retry below should work.',
+    retryable: true,
   },
   unreachable: {
     title: 'Medabrain could not be reached while this was being built.',
@@ -269,6 +287,48 @@ async function callOnce({ system, user, maxTokens, reasoningEffort, lane }) {
   } catch (err) {
     const aborted = err?.name === 'AbortError';
     return { retryable: true, detail: aborted ? 'client timeout' : `network error (${err?.message || 'unknown'})`, waitMs: aborted ? 0 : 1000 };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Ask the server whether a build can succeed BEFORE spending one.
+ *
+ * A build is five passes of up to four attempts. When the answer was always going to be no — no
+ * key on the deployment, this student's daily allowance spent, the school's shared ceiling reached
+ * — every one of those calls fails identically, and the student learns it after ninety seconds of
+ * backoff sleeps in the form of a roadmap that quietly became the deterministic slate. The server
+ * knows all of that before it dials anything (see the probe handler in api/groq.js), so asking
+ * costs one fast round-trip and turns a ninety-second mystery into an immediate sentence.
+ *
+ * Deliberately fail-OPEN. A probe that errors, times out, or comes back in a shape we don't
+ * recognize returns null, and the build proceeds exactly as it would have. This is an accelerant
+ * for a failure we can predict, never a new way to block a build that would have worked — a
+ * preflight that can veto is a preflight that can be wrong about it.
+ *
+ * @returns {Promise<{code: string, error: string|null}|null>} the terminal cause, or null to proceed
+ */
+export async function preflight({ lane = null, timeoutMs = 6000 } = {}) {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const r = await fetch('/api/groq', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ probe: true, purpose: 'roadmap', lane }),
+      signal: controller ? controller.signal : undefined,
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (!d || d.probe !== true || d.ok !== false) return null;
+    // Only a cause no retry can fix is worth aborting a build for. A minute bucket that needs
+    // another twenty seconds is exactly what call()'s backoff ladder is for, and short-circuiting
+    // it here would turn a build that recovers on its own into one that refuses to start.
+    if (!TERMINAL_CODES.has(d.code)) return null;
+    return { code: d.code, error: typeof d.error === 'string' ? d.error : null };
+  } catch {
+    return null;
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -409,6 +469,13 @@ function shortlistText(items) {
       i.format !== 'varies' ? i.format : null,
       i.confidence === 'typical' ? 'date is typical, not confirmed' : null,
       i.confidence === 'varies' ? 'date varies locally — student must look it up' : null,
+      // Where the student stands relative to a residency restriction. Stated in the shortlist
+      // rather than left for the model to work out from a state list, because "IN THEIR STATE" is
+      // a reason to pick something and the model should see the reason, not the raw data it would
+      // have to derive it from. Absent entirely when we do not know where they live.
+      i.proximity === 'home' ? 'IN THEIR STATE — far smaller applicant pool than a national equivalent' : null,
+      i.proximity === 'region' ? 'in their region' : null,
+      i.proximity === 'far' ? 'RESTRICTED TO STATES THEY DO NOT LIVE IN — do not pick this' : null,
       i.missed ? 'ALREADY PASSED THIS YEAR' : null,
     ].filter(Boolean).join(' · ');
     return `id: ${i.catalogId}
@@ -422,6 +489,8 @@ function shortlistText(items) {
 /** Who this student is, in prose. Draws on onboarding, the intake, and the Portfolio digest the caller passes in. */
 function studentText({ user, answers, portfolioFacts, gradeStage, today }) {
   const schools = targetSchools(answers);
+  const place = homePlace(answers);
+  const major = MAJOR_BY_ID[intendedMajor(answers)];
   const lines = [
     `Today is ${today}. They are a ${GRADE_LABELS[gradeStage] || gradeStage}.`,
     user?.name ? `Name: ${user.name}.` : null,
@@ -432,6 +501,22 @@ function studentText({ user, answers, portfolioFacts, gradeStage, today }) {
     user?.gpaBand ? `Self-reported grades: ${user.gpaBand}.` : null,
     (user?.obstacles || []).length ? `What they said gets in their way: ${(user.obstacles || []).join(', ')}.` : null,
     schools.length ? `Colleges they are aiming at: ${schools.join(', ')}. Every deadline and supplement in this roadmap should be back-planned from these.` : 'They have not named target colleges yet — say so, and make building that list an early item.',
+    // ── Where they live ──────────────────────────────────────────────────────
+    // The STATE, never the ZIP — see the note in intakeToPromptText. Written as
+    // an instruction rather than a fact because the model's job with this
+    // information is specific: prefer in-state programs, and refer to the state
+    // by name so the roadmap reads as having been written for a person who
+    // lives somewhere.
+    place
+      ? `They live in ${place.stateName} (${place.regionLabel}). Programs restricted to ${place.stateName} residents are among the best-value things available to them — a state applicant pool instead of a national one — so prefer them where the shortlist offers them, and name ${place.stateName} out loud when you do. Never pick anything the shortlist flags as restricted to states they do not live in.`
+      : 'They have not said where they live, so you do not know their state. Do not guess at one, do not say "near you" about anything, and prefer nationally open and virtual options. It is worth telling them once that adding a ZIP code would surface state programs they cannot currently see.',
+    // ── What they want to study ──────────────────────────────────────────────
+    // Framed to the model exactly as it is framed to the student, because the
+    // failure to avoid is a roadmap that treats a fifteen-year-old's guess at a
+    // major as a commitment and builds a narrow year around it.
+    major && major.id !== 'undecided'
+      ? `If they had to pick an undergraduate major today it would be: ${major.label}. Treat this as a LEAN, not a commitment — they are in high school and may well change it, and medical schools do not care which major anyone picks. What it should change is which of several equally good options you choose and what the year coheres around. For this major specifically: ${major.lean} The high-school courses it makes load-bearing next year: ${major.courses.join(', ')}.`
+      : 'They have not settled on a major, which is completely normal at this stage. Build the year broad enough that none of it is wasted whichever way they go, and say that is what you are doing.',
   ].filter(Boolean);
   const intake = intakeToPromptText(answers);
   return [lines.join('\n'), intake, portfolioFacts].filter(Boolean).join('\n\n');
@@ -520,7 +605,16 @@ Return ONLY this JSON:
   "omitted": [
     { "id": "a catalog id you deliberately left out that they might expect", "reason": "one honest sentence why not" }
   ],
-  "gaps": ["anything genuinely important for this student that was NOT in the catalog — name it, do not invent dates for it"]
+  "beyondCatalog": [
+    {
+      "name": "the real name of a competition, program or award that is NOT in the catalog above but genuinely belongs in THIS student's year",
+      "org": "who runs it, if you are sure — otherwise null",
+      "why": "1-2 sentences: why this specific student, given what you know about them. Not what it is — what it does for them.",
+      "whereToLook": "how they find its real deadline — the organization's own site, a school chapter, a state coordinator. Be specific about WHO holds the date.",
+      "track": "competition|program|scholarship|experience|academics|essays|relationships|testing|aid|application",
+      "confidence": "sure|unsure"
+    }
+  ]
 }
 
 Rules that decide whether this is a real roadmap or a list:
@@ -531,6 +625,7 @@ Rules that decide whether this is a real roadmap or a list:
 - Items marked ALREADY PASSED THIS YEAR: only include one if the student can still act on next year's cycle, and say so plainly in the reason.
 - Local items — the ones marked "date varies locally" — are usually the BEST bets, because the field is small and the student is already there. Use them. But no more than about two in five picks may be ones the student has to go and look the date up for, or the roadmap opens as a list of chores rather than a plan.
 - "omitted" is not optional and it is not padding — naming two or three things you deliberately did not choose, and why, is what makes the rest credible.
+- "beyondCatalog" is where you are allowed to go outside the list. Name up to four real things that belong in this student's year and are not above — a competition their state runs, a program at a university near them, an award in their specific field. THE ONE ABSOLUTE RULE: you may name the thing, and you may NEVER state its date. Not a day, not a month, not "usually around March", not "the deadline is in the spring". You do not know, and a date you produce here will be believed and acted on by a seventeen-year-old. Say WHO HOLDS the date instead, so they can go and get the real one. If you are not certain the thing exists under that name, mark it "unsure" — an unsure entry is useful and a confident wrong one is not.
 - Every id must appear exactly once. No markdown, JSON only.`;
 }
 
@@ -560,8 +655,46 @@ function resolveSelection(parsed, { slateById, seasons, trace }) {
   const omitted = arr(parsed?.omitted).slice(0, 6)
     .map((o) => ({ id: str(o?.id, 80), name: slateById[o?.id]?.name || null, reason: str(o?.reason, 300) }))
     .filter((o) => o.reason && o.name);
+  // ── Suggestions from outside the catalog ───────────────────────────────────
+  // The catalog is a whitelist for anything carrying a DATE, and that is not
+  // negotiable — it is the single mechanism that makes an invented deadline
+  // structurally impossible (see the header of src/data/roadmap/schema.js). But
+  // a whitelist of a few hundred entries cannot contain every competition worth
+  // a student's year: their state's own contests, a program at the university
+  // twenty minutes away, an award specific to the field they care about. Refusing
+  // to name those means the roadmap is silently narrower than the world.
+  //
+  // So the model may NAME things outside the catalog, and may never DATE them.
+  // That is the whole design, and the enforcement is here rather than in the
+  // prompt: every date-shaped field is stripped from a suggestion before it can
+  // reach a student, whatever the model returned. A suggestion arrives as a name,
+  // a reason, and instructions for finding the real deadline from whoever
+  // actually holds it — and it becomes a dated roadmap item only when the student
+  // has looked it up and typed it in themselves.
+  const beyondCatalog = arr(parsed?.beyondCatalog).slice(0, 4).map((g) => {
+    const name = str(g?.name, 140);
+    const why = str(g?.why, 400);
+    if (!name || !why) return null;
+    return {
+      name,
+      org: str(g?.org, 120),
+      why,
+      whereToLook: str(g?.whereToLook, 300) || 'Search the organization\'s own site for this year\'s deadline — it is the only place the real date lives.',
+      track: TRACK_IDS.includes(g?.track) ? g.track : 'competition',
+      // 'unsure' is surfaced to the student as a caveat rather than filtered out.
+      // A model that flags its own uncertainty is more useful than one that only
+      // ever speaks confidently, and hiding the flagged ones would train it out.
+      unsure: g?.confidence === 'unsure',
+      // Stripped unconditionally. Nothing downstream can render a date for a
+      // suggestion because no date survives this point, whatever was returned.
+      due: null, on: null, date: null, deadline: null,
+    };
+  }).filter(Boolean);
+
+  // The old flat-string shape, kept so a roadmap built before this change still
+  // renders its gaps rather than losing them on the next load.
   const gaps = arr(parsed?.gaps).slice(0, 5).map((g) => str(g, 300)).filter(Boolean);
-  return { picks, omitted, gaps };
+  return { picks, omitted, gaps, beyondCatalog };
 }
 
 // ── Pass 3: deepening one season ─────────────────────────────────────────────
@@ -736,6 +869,7 @@ export function heuristicRoadmap({ slate, seasons, answers, gradeStage }) {
     picks: kept,
     omitted: [],
     gaps: [],
+    beyondCatalog: [],
   };
 }
 
@@ -813,6 +947,18 @@ export async function createRoadmap({
   const slate = buildCandidateSlate({ user, answers: gates, now, horizonMonths: 12 });
   const seasons = buildSeasons(today);
 
+  // ── Preflight ──────────────────────────────────────────────────────────────
+  // One cheap round-trip that asks whether a build can succeed at all. Seeding the trace's
+  // terminal field is all it takes to change the outcome: every call() short-circuits on it
+  // without touching the network, so a doomed build resolves to the deterministic slate in about
+  // two seconds carrying the real reason, rather than in ninety carrying "unreachable". Fails
+  // open — see preflight().
+  const gate = await preflight({ lane });
+  if (gate) {
+    trace.terminal = gate.code;
+    noteError(trace, 'preflight', gate.error || gate.code);
+  }
+
   // ── Everything the model is shown, sized per rung ──────────────────────────
   // The shortlist and the student digest are the only two parts of these prompts
   // that scale with a student, so they are the only two that shrink. The stance,
@@ -860,7 +1006,7 @@ export async function createRoadmap({
   }), trace, 'select');
   let selection = selectionRaw
     ? resolveSelection(selectionRaw, { slateById, seasons: strategy.seasons, trace })
-    : { picks: fallback.picks, omitted: [], gaps: [] };
+    : { picks: fallback.picks, omitted: [], gaps: [], beyondCatalog: [] };
   // A model that returned JSON but chose almost nothing usable is a failed pass,
   // not a minimal roadmap. Four is the floor below which this is not a year.
   if (selection.picks.length < 4) {
@@ -874,7 +1020,7 @@ export async function createRoadmap({
       // button loses its credibility.
       if (!trace.thinSelection) trace.thinSelection = true;
     }
-    selection = { picks: fallback.picks, omitted: [], gaps: selection.gaps };
+    selection = { picks: fallback.picks, omitted: [], gaps: selection.gaps, beyondCatalog: selection.beyondCatalog };
   }
 
   // Pass 3 — deepen the near seasons, one call each.
@@ -923,6 +1069,7 @@ export async function createRoadmap({
     risks: strategy.risks,
     omitted: selection.omitted,
     gaps: selection.gaps,
+    beyondCatalog: selection.beyondCatalog || [],
     intake: answers,
     fingerprint: roadmapFingerprint({ user, answers, portfolio }),
   };
@@ -993,14 +1140,18 @@ export async function createRoadmap({
  * Deepen a season that was left as a spine at build time — called when the
  * student reaches it, or when they ask for it. One call, and it never damages
  * the existing roadmap: a failure returns the roadmap unchanged.
+ *
+ * `trace` is optional and exists for repairRoadmap, which deepens several seasons in one run: a
+ * terminal cause established while repairing the first season has to stop the rest, and it can
+ * only do that if they share a trace. Called on its own, this still gets a fresh one.
  */
-export async function deepenSeason(roadmap, seasonId, { user, portfolioFacts, lane, onStage = () => {} } = {}) {
+export async function deepenSeason(roadmap, seasonId, { user, portfolioFacts, lane, trace: sharedTrace = null, onStage = () => {} } = {}) {
   const season = (roadmap?.seasons || []).find((s) => s.id === seasonId);
   if (!season) return roadmap;
   const picks = (roadmap.items || []).filter((i) => i.season === seasonId && i.status !== 'skipped');
   if (!picks.length) return roadmap;
 
-  const trace = createTrace();
+  const trace = sharedTrace || createTrace();
   onStage(`Writing the working detail for ${season.label}…`);
   const studentAt = (i) => studentText({
     user, answers: roadmap.intake || {},
@@ -1106,6 +1257,17 @@ export async function repairRoadmap(roadmap, {
   }
 
   const trace = createTrace();
+
+  // The same preflight the initial build runs, and it matters more here than there. This is the
+  // "Rebuild it properly" button, and the failure it was reported for was pressing it against a
+  // cause a rebuild cannot touch: a minute and a half of nothing, then the same banner. Seeding
+  // the terminal code makes the button answer honestly and instantly instead. Fails open.
+  const gate = await preflight({ lane });
+  if (gate) {
+    trace.terminal = gate.code;
+    noteError(trace, 'preflight', gate.error || gate.code);
+  }
+
   let out = roadmap;
   const repaired = [];
 
@@ -1116,7 +1278,7 @@ export async function repairRoadmap(roadmap, {
     const season = (out.seasons || []).find((s) => s.id === seasonId);
     if (!season) continue;
     onStage(`Writing the working detail for ${season.label}…`);
-    const next = await deepenSeason(out, seasonId, { user, portfolioFacts, lane });
+    const next = await deepenSeason(out, seasonId, { user, portfolioFacts, lane, trace });
     // deepenSeason returns the SAME object on failure, which is what makes this
     // identity check a truthful test of whether anything was actually repaired.
     if (next !== out) { out = next; repaired.push(stage); }

@@ -133,7 +133,7 @@ const LENSES = [
   { id: 'generated', label: 'Typical dates', icon: Sparkles, blurb: 'Only the dates MedSchoolPrep generated from your class year and track. Treat these as a normal year, not as your year — confirm each one on the official site.' },
   // The Roadmap's own items, as a lens rather than a fourth tab — same reasoning that merged
   // Deadlines and Timeline in the first place. These are commitments the student chose during a
-  // thirteen-question intake, and reading them beside the dates they typed and the dates we
+  // fifteen-question intake, and reading them beside the dates they typed and the dates we
   // generated is the whole point of having one feed.
   { id: 'roadmap', label: 'From your roadmap', icon: MapIcon, blurb: 'Only the items on your twelve-month roadmap. Work on any of them happens in the Roadmap tab — this is where they sit on your calendar.' },
 ];

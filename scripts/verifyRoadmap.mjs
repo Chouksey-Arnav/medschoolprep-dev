@@ -39,6 +39,8 @@ const ENGINE = await import('../src/lib/roadmap/catalog.js');
 const INTAKE = await import('../src/lib/roadmap/intake.js');
 const MODEL = await import('../src/lib/roadmap/model.js');
 const GEN = await import('../src/lib/roadmap/generator.js');
+const GEO = await import('../src/lib/geo/zip.js');
+const MAJORS = await import('../src/lib/geo/majors.js');
 const { OPPORTUNITIES } = await import('../src/data/opportunities.js');
 const { SCHOLARSHIPS } = await import('../src/data/scholarships.js');
 
@@ -187,7 +189,11 @@ assert('the shortlist is chronological', shortlist.every((it, i) =>
 section('3. The intake stays short, answerable and complete');
 
 eq('the intake is exactly at its cap', INTAKE.QUESTIONS.length, INTAKE.MAX_QUESTIONS);
-assert('the cap is the promised 12-13', INTAKE.MAX_QUESTIONS >= 12 && INTAKE.MAX_QUESTIONS <= 13);
+// The cap moved to fifteen when `homeZip` and `intendedMajor` were added — see the header of
+// src/lib/roadmap/intake.js for what each one buys and why it was worth two more questions. The
+// band stays narrow deliberately: this assertion is the thing that makes adding a question a
+// decision rather than a habit.
+assert('the cap is the promised 14-15', INTAKE.MAX_QUESTIONS >= 14 && INTAKE.MAX_QUESTIONS <= 15);
 assert('every question id is unique', new Set(INTAKE.QUESTIONS.map((q) => q.id)).size === INTAKE.QUESTIONS.length);
 for (const q of INTAKE.QUESTIONS) {
   assert(`"${q.id}" is asked as a real question`, /\?$/.test(q.question || ''));
@@ -229,7 +235,11 @@ eq('an empty intake reports zero answered', emptyProgress.answered, 0);
 assert('an empty intake is incomplete', !emptyProgress.complete);
 const fullAnswers = Object.fromEntries(INTAKE.QUESTIONS.map((q) => [
   q.id,
-  q.kind === 'multi' ? [q.options[0].value] : q.kind === 'schools' ? ['Johns Hopkins'] : q.kind === 'text' ? 'x' : q.options[0].value,
+  q.kind === 'multi' ? [q.options[0].value]
+    : q.kind === 'schools' ? ['Johns Hopkins']
+      : q.kind === 'text' ? 'x'
+        : q.kind === 'zip' ? '27514'
+          : q.options[0].value,
 ]));
 assert('a fully answered intake is complete', INTAKE.intakeProgress(fullAnswers).complete);
 
@@ -251,6 +261,106 @@ assert('every prefilled answer carries a source note',
 const promptText = INTAKE.intakeToPromptText(fullAnswers);
 assert('intake prompt text is produced', !!promptText && promptText.length > 50);
 assert('intake prompt text is capped', promptText.length <= 2400);
+
+// ─────────────────────────────────────────────────────────────────────────────
+section('3b. Where the student lives, and what may be said about it');
+
+// A minor's home ZIP is the most sensitive thing this intake collects. The rule is that it never
+// reaches a prompt — the state does. This is the assertion that keeps that true, because the
+// failure mode is silent: a refactor that renders the raw answer would leak it with no visible
+// symptom at all.
+assert('the raw ZIP never reaches the generation prompt', !promptText.includes('27514'),
+  'intakeToPromptText emitted the student\'s ZIP code');
+assert('the state does reach the generation prompt', /North Carolina/.test(promptText),
+  'the whole point of asking is that the model knows which state');
+
+eq('a ZIP resolves to its state', GEO.resolveZip('27514')?.state, 'NC');
+eq('a ZIP+4 resolves the same way', GEO.resolveZip('27514-1234')?.state, 'NC');
+eq('a hyphenless ZIP+9 resolves the same way', GEO.resolveZip('275141234')?.state, 'NC');
+eq('a ZIP resolves to its Census region', GEO.resolveZip('27514')?.region, 'south');
+// Spot-checks across the allocation, including the two prefixes that sit inside another state's
+// block and are exactly what a hand-written range table gets wrong.
+for (const [zip, state] of [['90210', 'CA'], ['10001', 'NY'], ['02139', 'MA'], ['05401', 'VT'],
+  ['05501', 'MA'], ['99501', 'AK'], ['96813', 'HI'], ['88510', 'TX'], ['00901', 'PR'], ['20001', 'DC']]) {
+  eq(`${zip} resolves to ${state}`, GEO.resolveZip(zip)?.state, state);
+}
+// An unresolvable answer must be null rather than a nearest guess — a wrong state gates a student
+// into another state's residency programs and out of their own.
+for (const bad of ['', null, undefined, 'abcde', '1234', '00000', '42', {}, []]) {
+  assert(`${JSON.stringify(bad)} resolves to nothing rather than to a guess`, GEO.resolveZip(bad) === null);
+}
+
+// Proximity abstains when it does not know, which is the property that stops a card ever claiming
+// a program is near a student whose location we never learned.
+eq('proximity abstains with no place', GEO.proximity(null, ['NC']), null);
+const nc = GEO.resolveZip('27514');
+eq('an entry in their state is home', GEO.proximity(nc, ['NC']), 'home');
+eq('an entry in their region is regional', GEO.proximity(nc, ['GA']), 'region');
+eq('an entry across the country is far', GEO.proximity(nc, ['AK']), 'far');
+eq('an entry with no state list is national', GEO.proximity(nc, []), 'national');
+
+// Major affinity is a lean and never a filter: it can only ever promote.
+assert('every major scores every entry non-negatively',
+  CAT.ROADMAP_CATALOG.every((e) => MAJORS.MAJORS.every((m) => MAJORS.affinity(m.id, e) >= 0)));
+assert('affinity is bounded',
+  CAT.ROADMAP_CATALOG.every((e) => MAJORS.MAJORS.every((m) => MAJORS.affinity(m.id, e) <= 3)));
+eq('an unknown major leans on nothing', MAJORS.affinity('not-a-major', { tags: ['biology'] }), 0);
+eq('"not sure" leans on nothing', MAJORS.affinity('undecided', { tags: ['biology'] }), 0);
+assert('a stated major does lean on something',
+  MAJORS.affinity('neuroscience', { tags: ['neuroscience', 'brain bee'] }) > 0);
+assert('every major offers real next-year courses',
+  MAJORS.MAJORS.every((m) => MAJORS.coursesFor(m.id).length >= 2));
+// The intake's own option list and the taxonomy must not drift apart.
+const majorQ = INTAKE.QUESTION_BY_ID.intendedMajor;
+eq('the intake offers every major', majorQ.options.length, MAJORS.MAJORS.length);
+assert('every offered major is a real one', majorQ.options.every((o) => !!MAJORS.MAJOR_BY_ID[o.value]));
+eq('an unanswered major reads as undecided', INTAKE.intendedMajor({}), 'undecided');
+eq('a bogus major reads as undecided', INTAKE.intendedMajor({ intendedMajor: 'wizardry' }), 'undecided');
+
+// The state codes the catalog may declare and the ones the resolver can produce must be the same
+// list, or an entry could be authored for a state no ZIP can ever resolve to — invisible forever,
+// with no symptom.
+assert('every catalog-declarable state is a state the resolver knows',
+  CAT.US_STATE_CODES.every((s) => !!GEO.STATE_NAMES[s]),
+  CAT.US_STATE_CODES.filter((s) => !GEO.STATE_NAMES[s]).join(', '));
+assert('every state the resolver knows is declarable by the catalog',
+  GEO.STATE_CODES.every((s) => CAT.US_STATE_CODES.includes(s)),
+  GEO.STATE_CODES.filter((s) => !CAT.US_STATE_CODES.includes(s)).join(', '));
+assert('every state belongs to exactly one region',
+  GEO.STATE_CODES.every((s) => !!GEO.regionForState(s)),
+  GEO.STATE_CODES.filter((s) => !GEO.regionForState(s)).join(', '));
+
+// Location has to actually change the slate, or the question was not worth asking. Scored against
+// a synthetic in-state entry so this holds no matter how the real catalog's `states` fields evolve.
+{
+  const local = { id: 'x', name: 'x', track: 'program', priority: 'helpful', selectivity: 'open', effort: 'moderate', cost: 'free', confidence: 'typical', states: ['NC'], tags: [] };
+  const ctx = { today: TODAY, window: null };
+  const withPlace = ENGINE.scoreEntry(local, { ...ctx, place: GEO.resolveZip('27514') });
+  const noPlace = ENGINE.scoreEntry(local, ctx);
+  const wrongPlace = ENGINE.scoreEntry(local, { ...ctx, place: GEO.resolveZip('99501') });
+  assert('an in-state entry outranks the same entry with no location known', withPlace > noPlace,
+    `${withPlace} vs ${noPlace}`);
+  assert('an out-of-state entry sinks below the same entry with no location known', wrongPlace < noPlace,
+    `${wrongPlace} vs ${noPlace}`);
+  assert('an out-of-state entry still scores above zero rather than vanishing', wrongPlace > 0,
+    'burying is recoverable, deleting is not — see the location term in scoreEntry');
+  // A major can only ever promote.
+  const bio = { ...local, states: undefined, tags: ['biology', 'research'] };
+  assert('a matching major raises an entry',
+    ENGINE.scoreEntry(bio, { ...ctx, major: 'biology' }) > ENGINE.scoreEntry(bio, { ...ctx, major: 'undecided' }));
+  assert('a non-matching major never lowers an entry',
+    ENGINE.scoreEntry(bio, { ...ctx, major: 'humanities' }) >= ENGINE.scoreEntry(bio, { ...ctx, major: 'undecided' }));
+}
+
+// Skipping the ZIP must never block a roadmap. It is optional, and a student who declines to give
+// their home location still gets a full year.
+assert('the ZIP question is optional', INTAKE.QUESTION_BY_ID.homeZip.optional === true);
+assert('a roadmap intake without a ZIP is still complete',
+  INTAKE.intakeProgress({ ...fullAnswers, homeZip: null }).complete);
+assert('gates carry no place when the ZIP is skipped',
+  INTAKE.answersToGates({ ...fullAnswers, homeZip: null }).place === undefined);
+eq('gates carry the state when it is given',
+  INTAKE.answersToGates({ ...fullAnswers, homeZip: '27514' }).homeState, 'NC');
 
 // ─────────────────────────────────────────────────────────────────────────────
 section('4. Generation always yields a usable roadmap');
@@ -404,6 +514,54 @@ const forged = { ...base, items: [...base.items, { id: 'x', addedBy: 'model', ti
 assert('a forged model-authored date is caught', MODEL.assertTraceable(forged).length === 1);
 const badLink = { ...base, items: [...base.items, { id: 'y', addedBy: 'model', title: 'Ghost', due: '2027-01-01', catalogId: 'not-real', status: 'todo' }] };
 assert('a dangling catalog id is caught', MODEL.assertTraceable(badLink).length === 1);
+
+// ── Suggestions from outside the catalog ────────────────────────────────────
+// The catalog whitelist is what makes an invented DATE impossible. Suggestions are the
+// deliberate hole in the whitelist for NAMES, and the rule that keeps that safe is that a
+// suggestion can never carry a date of its own — only one a student typed in. These
+// assertions are the enforcement.
+{
+  const sg = { name: 'State Science Olympiad', org: 'Somebody', why: 'Because.', whereToLook: 'Their site.', track: 'competition' };
+  const withSg = MODEL.addSuggestionAsItem(base, sg, '2027-03-04');
+  eq('accepting a suggestion appends exactly one item', countOf(withSg), countOf(base) + 1);
+  const item = withSg.items[withSg.items.length - 1];
+  eq('an accepted suggestion is the student\'s own item', item.addedBy, 'student');
+  assert('and is marked as having come from a suggestion', item.fromSuggestion === true);
+  assert('it carries no catalog id', !item.catalogId);
+  eq('it carries the date the student typed', item.studentDate, '2027-03-04');
+  assert('it renders as an exact date, because they looked it up', CAT.displaysExactDate(item));
+  assert('it is exempt from catalog traceability', MODEL.assertTraceable(withSg).length === 0);
+  assert('the reason keeps the instructions for finding the real date', /Their site/.test(item.why));
+
+  // A suggestion with no date is kept rather than lost — better an undated item the
+  // roadmap keeps asking about than a suggestion discarded because the student could not
+  // find the deadline in the moment.
+  const undated = MODEL.addSuggestionAsItem(base, sg, null);
+  eq('a suggestion with no date is still accepted', countOf(undated), countOf(base) + 1);
+  assert('and is flagged as needing one', undated.items[undated.items.length - 1].needsStudentDate === true);
+
+  // Garbage in must not produce an item.
+  for (const bad of [null, undefined, {}, { name: '' }, 'x', 42]) {
+    eq(`a ${JSON.stringify(bad)} suggestion is ignored`, countOf(MODEL.addSuggestionAsItem(base, bad, '2027-01-01')), countOf(base));
+  }
+  // An unknown track falls back rather than producing an item on no track at all.
+  const oddTrack = MODEL.addSuggestionAsItem(base, { ...sg, track: 'wizardry' }, '2027-03-04');
+  assert('an unknown track falls back to a real one',
+    CAT.TRACK_IDS.includes(oddTrack.items[oddTrack.items.length - 1].track));
+}
+
+// The generator's own contract: it may name things outside the catalog and may never date
+// them. The prompt says so; this asserts the CODE strips dates regardless of what came
+// back, because a rule that lives only in a prompt is a rule a model can ignore.
+{
+  const genSrc = read('src/lib/roadmap/generator.js');
+  assert('the selection prompt asks for out-of-catalog suggestions', /beyondCatalog/.test(genSrc));
+  assert('and forbids dating them in the strongest terms',
+    /may NEVER state its date/.test(genSrc), 'the one rule that makes this safe');
+  assert('and the code strips every date field regardless of what came back',
+    /due: null, on: null, date: null, deadline: null/.test(genSrc),
+    'a rule that lives only in a prompt is a rule a model can ignore');
+}
 
 // URL sanitisation. Every roadmap URL ends up in an `<a href>` a student clicks, and two of them
 // are not build-checked: one a student types, and one arriving on a roadmap restored from a
@@ -805,7 +963,7 @@ for (const g of READY.ROADMAP_GATES) {
   assert(`gate "${g.id}" is answerable today`, typeof g.ok === 'function');
 }
 assert('the gate list stays short enough to be read', READY.ROADMAP_GATES.length <= 6,
-  `${READY.ROADMAP_GATES.length} gates — onboarding already asks thirty questions and the intake thirteen`);
+  `${READY.ROADMAP_GATES.length} gates — onboarding already asks thirty questions and the intake fifteen`);
 {
   // A gate pointing at a tab that does not exist sends the student to Home,
   // which reads as the app losing track of what it just asked them to do.
@@ -847,7 +1005,7 @@ assert('the gate list stays short enough to be read', READY.ROADMAP_GATES.length
     loading.checklist.filter((c) => c.kind === 'portfolio').every((c) => c.state === 'loading'));
   assert('and a loading gate does not block the build', loading.ready);
 }
-assert('the tab checks readiness before asking thirteen questions, not after',
+assert('the tab checks readiness before asking fifteen questions, not after',
   tabSrc.indexOf('computeRoadmapReadiness') !== -1
   && tabSrc.indexOf('readiness.ready') < tabSrc.indexOf('<RoadmapIntake'),
   'finding out a roadmap cannot be built AFTER the intake is the app wasting a student\'s time and then blaming them for it');

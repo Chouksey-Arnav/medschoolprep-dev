@@ -39,6 +39,7 @@
 // guessed, so it is never inferred: an entry without a confirmed cost model simply omits the
 // field, and the UI reports those as "not listed" rather than folding them into "Free".
 import { OPPORTUNITIES_EXPANSION } from './opportunitiesExpansion.js';
+import { OPPORTUNITIES_COMPETITIONS } from './opportunitiesCompetitions.js';
 
 export const OPPORTUNITY_TYPES = ['All', 'Competition', 'Research', 'Scholarship', 'Volunteering', 'Organization', 'Academic', 'Program'];
 export const OPPORTUNITY_LEVELS = ['National', 'International', 'State', 'Regional', 'Local'];
@@ -736,4 +737,4 @@ const BASE_OPPORTUNITIES = [
  * student can browse", and a catalog split in two is a catalog where half the
  * entries silently stop being searchable.
  */
-export const OPPORTUNITIES = [...BASE_OPPORTUNITIES, ...OPPORTUNITIES_EXPANSION];
+export const OPPORTUNITIES = [...BASE_OPPORTUNITIES, ...OPPORTUNITIES_EXPANSION, ...OPPORTUNITIES_COMPETITIONS];

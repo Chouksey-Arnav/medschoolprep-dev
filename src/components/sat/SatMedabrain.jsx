@@ -11,6 +11,7 @@ import Portal from '../ui/Portal';
 import { skillMeta, ERROR_TYPES } from '../../data/sat/taxonomy';
 import { strategyFor } from '../../data/sat/strategies';
 import { satGrad, satWash } from './satUi';
+import { aiLane } from '../../lib/aiLane';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Medabrain, SAT branch.
@@ -161,6 +162,7 @@ export default function SatMedabrain({
           system,
           messages: nextMsgs.slice(-10),
           purpose: 'sat',
+          lane: aiLane(),
           // Two different jobs wearing one name. With a question on screen this
           // is a hint machine working from a rationale it was already handed —
           // Guide is plenty, and it keeps the turn fast while the student is

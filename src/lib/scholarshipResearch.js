@@ -11,6 +11,8 @@
 // back as prose ranges/seasons, never an invented exact figure or date presented as this year's
 // real value. `recognized:false` is the model's own admission it doesn't actually know the
 // program, which the UI surfaces plainly instead of quietly showing confident-looking blanks.
+import { aiLane } from './aiLane.js';
+
 export async function researchScholarship(name) {
   const trimmed = String(name || '').trim();
   if (!trimmed) throw new Error('Enter a scholarship name first.');
@@ -43,6 +45,7 @@ This mirrors exactly how MedSchoolPrep's own curated scholarship database descri
       system,
       message: `Research the scholarship "${trimmed}" and return the JSON object.`,
       purpose: 'portfolio',
+      lane: aiLane(),
       jsonMode: true,
       maxTokens: 500,
     }),

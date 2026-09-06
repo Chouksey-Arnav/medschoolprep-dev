@@ -6,7 +6,7 @@ import {
   AlertTriangle, ShieldQuestion, Lightbulb, Plus, Download,
   Layers, Scale, Quote, X, Info, CheckCircle2, TrendingUp, ArrowRight, Circle, Lock,
 } from 'lucide-react';
-import { C, glass, glass2, btn, btnSm, btnG, R, CC, G, tint, pill, accentFill, onTint, autoGrid, inp } from '../../lib/theme';
+import { C, glass, glass2, btn, btnSm, btnG, R, CC, G, tint, pill, accentFill, accentText, onTint, autoGrid, inp } from '../../lib/theme';
 import SubNav from '../ui/SubNav';
 import PanelHero, { SectionTitle, StatTile } from '../ui/PanelHero';
 import EmptyState from '../ui/EmptyState';
@@ -24,7 +24,7 @@ import {
 import {
   allItems, itemsInSeason, currentSeason, nextActions, roadmapStats, roadmapToCalendarEvents,
   toggleItemDone, setItemStatus, setItemDate, moveItemToSeason, toggleItemStep,
-  addStudentItem, removeItem, itemUrgency, effectiveDue, roadmapIsStale, roadmapIsExpired,
+  addStudentItem, addSuggestionAsItem, removeItem, itemUrgency, effectiveDue, roadmapIsStale, roadmapIsExpired,
   crunchMonths, validateSlate, OPEN_STATUSES, URGENCY_ORDER,
 } from '../../lib/roadmap/model';
 import RoadmapIntake from './RoadmapIntake';
@@ -56,7 +56,7 @@ import { dayKey, daysBetween } from '../../lib/timeline';
 //   seasons  — the strategy, quarter by quarter, with the items inside each.
 //   list     — everything, filterable. The reference view for someone who knows
 //              what they are looking for.
-//   intake   — the thirteen answers, editable, because the roadmap is only as
+//   intake   — the fifteen answers, editable, because the roadmap is only as
 //              good as its inputs and those change.
 //
 // ── What this tab is NOT allowed to do ──────────────────────────────────────
@@ -233,7 +233,7 @@ export default function RoadmapTab({
   const balance = useMemo(() => (roadmap ? (roadmap.balance || validateSlate(roadmap)) : null), [roadmap]);
 
   // ── Can a roadmap usefully be built for this student yet? ──────────────────
-  // Checked before the intake rather than after it: asking thirteen questions
+  // Checked before the intake rather than after it: asking fifteen questions
   // and THEN saying "actually we cannot build this" would be the worst possible
   // ordering, and it is the ordering you get by default if the gate lives next
   // to the generator. See src/lib/roadmap/readiness.js for why each gate is
@@ -313,7 +313,12 @@ export default function RoadmapTab({
     attemptedDeepenRef.current.add(needs.id);
     (async () => {
       try {
-        const next = await deepenSeason(roadmap, needs.id, { user, portfolioFacts, lane: user?.id || null });
+        // Same lane expression as the build and the repair below. The lane now decides which
+        // rate-limit budget the call spends (see subjectFor in api/groq.js), so a student who
+        // fell back to their email for one call and to nothing for another would be two different
+        // people to the budget — and the one with no lane at all would be charged to the whole
+        // school's shared bucket, which is the failure this was all fixed for.
+        const next = await deepenSeason(roadmap, needs.id, { user, portfolioFacts, lane: user?.id || user?.email || null });
         if (next !== roadmap) commit(next, `deepened ${needs.label}`);
       } finally {
         deepenRef.current = false;
@@ -426,6 +431,25 @@ export default function RoadmapTab({
   const onToggleStep = mutate(toggleItemStep, 'ticked a step');
   const onRemove = mutate(removeItem, 'removed an item');
 
+  /**
+   * Accept a suggestion from outside the catalog, with the date the student found.
+   *
+   * The item that comes out is theirs — `addedBy: 'student'`, exempt from catalog
+   * traceability, rendered as an exact date because a student who looked something up is
+   * right about it. From here it is an ordinary roadmap item, which is the whole point:
+   * it flows into the milestone feed, the sixty-day horizon and the dashboard's next
+   * three alongside everything else, rather than living in a separate list of
+   * suggestions nobody revisits.
+   */
+  const acceptSuggestion = useCallback((suggestion, date) => {
+    const next = addSuggestionAsItem(roadmap, suggestion, date);
+    if (next === roadmap) return;
+    commit(next, `added ${suggestion.name}`);
+    toast.success(date
+      ? `${suggestion.name} is on your roadmap, and on your dashboard.`
+      : `${suggestion.name} is on your roadmap. Add the date when you find it and it will show up on your dashboard too.`);
+  }, [roadmap, commit]);
+
   const exportCalendar = useCallback(() => {
     const events = roadmapToCalendarEvents(roadmap);
     if (!events.length) { toast('Nothing dated to export yet.'); return; }
@@ -439,7 +463,7 @@ export default function RoadmapTab({
 
   // ── The gate stands in front of the FIRST build, and nothing else ─────────
   // In front, not behind: a student who has not told us their grade cannot be
-  // given a year, and finding that out after thirteen questions would be the app
+  // given a year, and finding that out after fifteen questions would be the app
   // wasting their time and then blaming them for it.
   //
   // And only the first build. Once a roadmap exists the gate never appears
@@ -578,7 +602,8 @@ export default function RoadmapTab({
         )}
 
         {activeView === 'intake' && (
-          <AnswersView roadmap={roadmap} accent={C.fuchsia} onEdit={() => setShowIntake(true)} onRebuild={rebuild} />
+          <AnswersView roadmap={roadmap} accent={C.fuchsia} onEdit={() => setShowIntake(true)} onRebuild={rebuild}
+            onAcceptSuggestion={acceptSuggestion} />
         )}
       </div>
     </div>
@@ -631,7 +656,7 @@ function IntroScreen({ accent, isMobile, onStart, user, readiness, onGo }) {
         ) : (
           <>
             <button onClick={onStart} style={{ ...btn(accentFill(accent)), color: onTint(accent), marginTop: 24, fontSize: 15, letterSpacing: 'calc(-0.02px + var(--msp-letter-spacing))', padding: '12px 24px' }}>
-              <Sparkles size={16} /> Start the thirteen questions
+              <Sparkles size={16} /> Start the fifteen questions
             </button>
             <div style={{ fontSize: 11, color: C.t4, marginTop: 12 }}>
               About four minutes{user?.name ? `, ${user.name}` : ''} — most of it is confirming what we already know.
@@ -1650,16 +1675,97 @@ function AddItemForm({ roadmap, onAdd, onCancel, accent }) {
   );
 }
 
+// ── Suggestions from outside the catalog ─────────────────────────────────────
+//
+// The catalog is a whitelist for anything carrying a date, which is what makes an
+// invented deadline structurally impossible. But a whitelist of a few hundred entries
+// cannot hold every competition worth a student's year — their state's own contests, a
+// program at the university twenty minutes away, an award in the exact field they care
+// about — and refusing to name those makes the roadmap silently narrower than the world.
+//
+// So Medabrain may NAME things outside the catalog and may never DATE them (every
+// date-shaped field is stripped server-side; see the beyondCatalog block in
+// generator.js). What arrives here is a name, a reason, and who actually holds the
+// deadline. This card is the seam where that becomes a real commitment: the student
+// goes and finds the date, types it in, and it lands on their roadmap as their own item
+// — which then flows into the milestone feed, the sixty-day horizon and the dashboard's
+// next-three like any other date they own.
+function BeyondCatalogCard({ suggestions, accent, onAccept }) {
+  const [openId, setOpenId] = useState(null);
+  const [date, setDate] = useState('');
+  if (!suggestions?.length) return null;
+
+  return (
+    <div style={{ ...glass2({ padding: 16 }) }}>
+      <SectionTitle icon={Sparkles} color={accentText(C.gold)}>Worth doing, and not in our catalog</SectionTitle>
+      <div style={{ fontSize: 11.5, color: C.t3, lineHeight: 1.55, marginBottom: 12 }}>
+        Medabrain named these because they belong in your year, not because they are on a
+        list — our catalog does not have them. It is deliberately not allowed to tell you
+        when they close, because it does not know and a made-up deadline is worse than no
+        deadline. Find the real date, put it in, and it becomes part of your roadmap like
+        anything else.
+      </div>
+      <div style={CC({ gap: 8 })}>
+        {suggestions.map((sg, i) => {
+          const id = `${sg.name}-${i}`;
+          const open = openId === id;
+          return (
+            <div key={id} style={{ ...glass2({ padding: 12 }), border: `1px solid ${open ? tint(accent, 0.3) : C.b1}` }}>
+              <div style={{ ...R({ gap: 8, flexWrap: 'wrap' }) }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: C.t1 }}>{sg.name}</span>
+                {sg.org && <span style={{ fontSize: 11.5, color: C.t3 }}>{sg.org}</span>}
+                <span style={pill(tint(C.gold, 0.14), accentText(C.gold), { fontSize: 10 })}>
+                  {TRACK_BY_ID[sg.track]?.label || 'Competition'}
+                </span>
+                {/* A model that flags its own uncertainty is more useful than one that only
+                    ever speaks confidently — so the flag is shown rather than filtered. */}
+                {sg.unsure && (
+                  <span style={pill(tint(C.amber, 0.14), accentText(C.amber), { fontSize: 10 })}>
+                    Medabrain is not certain this exists — check before you plan around it
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 12, color: C.t2, lineHeight: 1.55, marginTop: 8 }}>{sg.why}</div>
+              <div style={{ fontSize: 11.5, color: C.t3, lineHeight: 1.55, marginTop: 8 }}>
+                <b style={{ color: C.t2 }}>Where the real date lives:</b> {sg.whereToLook}
+              </div>
+              {open ? (
+                <div style={{ ...R({ gap: 8, marginTop: 12, flexWrap: 'wrap' }) }}>
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                    aria-label={`Deadline for ${sg.name}`} style={inp({ flex: '1 1 160px', width: 'auto' })} />
+                  <button onClick={() => { onAccept(sg, date || null); setOpenId(null); setDate(''); }}
+                    style={{ ...btn(accentFill(accent)), color: onTint(accent), fontSize: 12, padding: '8px 16px' }}>
+                    Add to my roadmap
+                  </button>
+                  <button onClick={() => { setOpenId(null); setDate(''); }} style={btnG({ fontSize: 12, padding: '8px 16px' })}>Cancel</button>
+                  <div style={{ fontSize: 10.5, color: C.t4, lineHeight: 1.55, flexBasis: '100%' }}>
+                    Leave the date blank if you have not found it yet — it will sit in your
+                    &quot;dates to find&quot; list instead of being lost.
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setOpenId(id)} style={{ ...btnSm({ fontSize: 11.5, marginTop: 12 }) }}>
+                  <Plus size={12} />I found the date — add it
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Answers ──────────────────────────────────────────────────────────────────
 
-function AnswersView({ roadmap, accent, onEdit, onRebuild }) {
+function AnswersView({ roadmap, accent, onEdit, onRebuild, onAcceptSuggestion }) {
   const progress = intakeProgress(roadmap.intake || {});
   return (
     <>
       <div style={{ ...glass({ padding: 20 }) }}>
         <SectionTitle icon={Target} color={accent}>What this roadmap was built from</SectionTitle>
         <div style={{ fontSize: 12.5, color: C.t3, lineHeight: 1.55, marginBottom: 16, maxWidth: 640 }}>
-          These thirteen answers, plus everything in your Portfolio and everything you told us during
+          These fifteen answers, plus everything in your Portfolio and everything you told us during
           setup. Change any of them and rebuild — the roadmap is only ever as good as what it knows
           about you, and what it knows about you changes.
         </div>
@@ -1671,6 +1777,8 @@ function AnswersView({ roadmap, accent, onEdit, onRebuild }) {
         </div>
         <div style={{ fontSize: 11, color: C.t4, marginTop: 12 }}>{progress.answered} of {progress.total} answered</div>
       </div>
+
+      <BeyondCatalogCard suggestions={roadmap.beyondCatalog} accent={accent} onAccept={onAcceptSuggestion} />
 
       {!!roadmap.gaps?.length && (
         <div style={{ ...glass2({ padding: 16 }) }}>

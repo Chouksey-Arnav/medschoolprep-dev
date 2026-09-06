@@ -56,6 +56,7 @@ import { strategyFor } from '../../data/sat/strategies';
 import { renderProfileForPrompt, profileFingerprint } from './learnerProfile';
 import * as DB from '../db';
 import { isBalanced, CHOICE_LENGTH_CONTRACT } from './answerBalance';
+import { aiLane } from '../aiLane.js';
 
 /** Hard ceiling on items per generation request, whatever the caller asks for. */
 const MAX_ITEMS = 10;
@@ -383,6 +384,7 @@ async function verifyItems(items, { signal } = {}) {
         system: VERIFIER_PROMPT,
         message: renderForVerification(items),
         purpose: 'sat',
+        lane: aiLane(),
         // A different model family from the author on purpose — see the header.
         tier: 'sage',
         jsonMode: true,
@@ -510,6 +512,7 @@ export async function generatePracticeSet({
         system: buildAuthorPrompt({ profile, blueprint, mode }),
         message: `Write exactly ${requested} question(s) following the blueprint above. Return the JSON object and nothing else.`,
         purpose: 'sat',
+        lane: aiLane(),
         // See the header: authoring is a reasoning task, so it gets the
         // reasoning model at its deepest setting.
         tier: 'oracle',
@@ -642,6 +645,7 @@ export async function generateBaselineItem({
         system: buildAuthorPrompt({ profile, blueprint, mode: 'drill' }) + avoidBlock,
         message: `Write exactly 1 question following the blueprint above, at difficulty ${blueprint[0].difficulty}. Return the JSON object and nothing else.`,
         purpose: 'sat',
+        lane: aiLane(),
         tier: 'oracle',
         reasoningEffort: 'high',
         jsonMode: true,

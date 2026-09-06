@@ -14,6 +14,7 @@ import { summarizeRoadmapForPrompt } from '../lib/roadmap/model';
 import { renderMarkdown } from '../lib/renderMarkdown';
 import { parseAssistantDirective, describeAction, executeAction, labelForDestination } from '../lib/medabrainActions';
 import MedabrainLauncher from './MedabrainLauncher';
+import { aiLane } from '../lib/aiLane';
 
 // The first two are the questions this panel can now answer with real evidence rather than
 // generalities: it is handed the term-by-term GPA history and every activity with the
@@ -99,7 +100,7 @@ export default function PortfolioMedabrain({ user, pathwayLabel, gradeLabel, acc
       } catch { /* the prompt is still complete without it */ }
       // Their twelve-month Roadmap, if they have built one. This specialist gets asked "what
       // should I apply to" more than any other surface in the app — which is precisely the
-      // question the Roadmap tab has already answered in detail after a thirteen-question
+      // question the Roadmap tab has already answered in detail after a fifteen-question
       // intake. Without this the two would offer the same student two different years.
       let roadmapSummary = null;
       try { roadmapSummary = summarizeRoadmapForPrompt(user?.roadmap); } catch { /* optional */ }
@@ -125,6 +126,9 @@ export default function PortfolioMedabrain({ user, pathwayLabel, gradeLabel, acc
         body: JSON.stringify({
           system: sys, messages: nextMsgs.slice(-10), purpose: 'portfolio', maxTokens: 1600,
           ...(safety.safetyTier ? { safetyTier: safety.safetyTier } : {}),
+          // Whose rate-limit budget this request spends. Without it every request from one
+          // school's NAT shares a single allowance — see src/lib/aiLane.js.
+          lane: aiLane(),
         }),
       });
       const data = await res.json().catch(() => ({}));

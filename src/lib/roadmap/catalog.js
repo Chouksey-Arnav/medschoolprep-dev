@@ -31,6 +31,8 @@ import {
 } from '../../data/roadmap/index.js';
 import { dayKey, daysBetween, shiftDays, classFallYears, effectiveGradeStage, gradeIdxOf, GRADE_KEYS } from '../timeline.js';
 import { auditSlate } from './dateAudit.js';
+import { proximity } from '../geo/zip.js';
+import { affinity } from '../geo/majors.js';
 
 /** Grade stage key → the '9'..'12' string the catalog gates on. 'gap' reads as senior. */
 export const GRADE_NUMBER = { freshman: '9', sophomore: '10', junior: '11', senior: '12', gap: '12' };
@@ -176,7 +178,7 @@ const EFFORT_LOAD = { light: 1, moderate: 2, heavy: 4, immersive: 6 };
  * the student said they want.
  */
 export function scoreEntry(entry, ctx) {
-  const { today, interests = [], appetite = 'moderate', selectivityStomach = 'balanced' } = ctx;
+  const { today, interests = [], appetite = 'moderate', selectivityStomach = 'balanced', place = null, major = 'undecided' } = ctx;
   let score = 40;
 
   // Priority: the catalog's own view of how much this matters.
@@ -220,6 +222,39 @@ export function scoreEntry(entry, ctx) {
   // competition, and the student is already there.
   if (entry.confidence === 'varies' && entry.selectivity === 'open') score += 6;
 
+  // ── Where they live ────────────────────────────────────────────────────────
+  // The largest single term in this function after urgency, and it deserves to
+  // be. A state health-pipeline program, an AHEC summer placement, a state
+  // medical society scholarship: the applicant pool is one state rather than
+  // fifty, so a student's odds at an in-state program are not marginally better
+  // than at the national equivalent, they are different by an order of
+  // magnitude. These are consistently the best-value things available to a high
+  // schooler and consistently the ones nobody tells them about.
+  //
+  // The asymmetry is deliberate. 'home' is a large bonus; 'far' is a large
+  // penalty but never a removal, because a residency-restricted entry that
+  // slipped past its own gate should sink rather than vanish — a student who
+  // spends summers with a grandparent in another state is a real person, and
+  // burying a thing is recoverable where deleting it is not.
+  //
+  // All of it is conditional on actually knowing where they live. With no place
+  // — the ZIP is optional and plenty of students will skip it — every entry
+  // scores exactly as it did before, rather than a national default quietly
+  // outranking the local programs this term exists to promote.
+  if (place) {
+    const band = proximity(place, entry.states);
+    if (band === 'home') score += 16;
+    else if (band === 'region') score += 7;
+    else if (band === 'far') score -= 22;
+  }
+
+  // ── What they want to study ────────────────────────────────────────────────
+  // A lean, never a filter — see the header of src/lib/geo/majors.js for why
+  // this can only ever add. Capped well below the location and urgency terms: a
+  // major is a fifteen-year-old's current guess, and it should tilt a year
+  // rather than decide it.
+  score += affinity(major, entry) * 4;
+
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
@@ -247,6 +282,12 @@ export function buildCandidateSlate({ user = null, answers = {}, now = new Date(
     interests: answers.interests || [],
     appetite: answers.timeAppetite || 'moderate',
     selectivityStomach: answers.selectivityStomach || 'balanced',
+    // Both already resolved by answersToGates — this module never parses a ZIP
+    // or validates a major id, it only reads the resolved answers. `place` is
+    // null whenever the student skipped the question, and scoreEntry treats
+    // null as "say nothing about location" rather than as a default.
+    place: answers.place || null,
+    major: answers.intendedMajor || 'undecided',
   };
 
   const items = [];
@@ -336,6 +377,16 @@ function makeItem(entry, window, ctxBase, extra = {}) {
     prepWeeks: entry.prepWeeks || 0,
     opportunityId: entry.opportunityId || null,
     scholarshipId: entry.scholarshipId || null,
+    // Where you have to live to be eligible. Null for a nationally open entry.
+    // Carried onto the item rather than looked back up from the catalog because
+    // the item is what the UI and the generation prompt both hold, and a card
+    // that wants to say "this one is in your state" should not have to reach
+    // back into the catalog to find out.
+    states: entry.states || null,
+    // The band the card may print, resolved once here against the student we are
+    // building for. Null whenever we do not know where they live — see
+    // proximity() for why abstaining beats defaulting.
+    proximity: proximity(ctxBase.place, entry.states),
     opens: window?.opens || null,
     due: window?.due || null,
     on: window?.on || null,

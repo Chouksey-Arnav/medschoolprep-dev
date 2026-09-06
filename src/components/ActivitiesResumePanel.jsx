@@ -264,6 +264,8 @@ export default function ActivitiesResumePanel({
   // a Medabrain deep link can still open the exact form it used to — see
   // resumeSection there.
   section = null, sectionNonce = 0, onSectionChange = null,
+  // (sectionId) => node — the Common App mirror strip. See SectionScroller's own prop.
+  mirrorBadge = null,
   // Sections this student hasn't unlocked yet, from featureUnlock's ladder.
   // Empty (the default) means every section is open, which is what a standalone
   // render of this panel — and any account past the ladder — sees.
@@ -557,7 +559,7 @@ export default function ActivitiesResumePanel({
         onExported={(mode, { preview } = {}) => { if (!preview) onResumeExported?.(mode); }} />
 
       <SectionScroller
-        accent={accent} isMobile={isMobile}
+        accent={accent} isMobile={isMobile} mirrorBadge={mirrorBadge}
         focusId={focus.id} focusNonce={focus.n}
         onSectionOpen={onSectionChange || undefined}
         printLabel="Print the whole record"

@@ -182,6 +182,28 @@ export const YEAR_SLOTS = ['freshman', 'sophomore', 'junior', 'senior', 'current
  * entry from every roadmap, which is the quietest way for a catalog to rot.
  * verifyRoadmap.mjs asserts each one is reachable.
  */
+/**
+ * The USPS codes an entry may declare in `states`.
+ *
+ * `states` is how an entry says "you have to live here". Omitting it means the
+ * entry is open nationally, which is the common case and therefore the default —
+ * an entry that forgot to declare its restriction is offered to everyone, which
+ * is a recoverable mistake, where a default of "restricted to nowhere" would
+ * make every entry invisible, which is not.
+ *
+ * Duplicated here rather than imported from src/lib/geo/zip.js because this
+ * module must stay loadable under plain Node by scripts/verifyRoadmap.mjs with
+ * no imports out of src/data — the same constraint that keeps the theme out of
+ * this file. The verify script asserts the two lists agree, so they cannot
+ * silently drift.
+ */
+export const US_STATE_CODES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'GU', 'HI', 'ID',
+  'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT',
+  'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'PR', 'RI',
+  'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+];
+
 export const GATE_KEYS = [
   'needsFinancialAid',   // true when the student reports aid matters
   'firstGen',            // first-generation college student
@@ -328,6 +350,12 @@ export function validateEntry(e) {
   if (has(e, 'cost')) need(COSTS.includes(e.cost), `cost ${e.cost} is not valid`);
   if (has(e, 'requires')) {
     Object.keys(e.requires || {}).forEach((k) => need(GATE_KEYS.includes(k), `requires.${k} is not a known gate — add it to GATE_KEYS and make the intake able to answer it`));
+  }
+  if (has(e, 'states')) {
+    need(Array.isArray(e.states) && e.states.length > 0,
+      'states, when present, must be a non-empty array — omit it entirely for a nationally open entry rather than declaring []');
+    (e.states || []).forEach((s) => need(US_STATE_CODES.includes(s),
+      `states entry ${JSON.stringify(s)} is not a USPS state code — use two uppercase letters ("NC", not "North Carolina")`));
   }
 
   // Date shape. A 'varies' entry must carry a human-readable `season`, because

@@ -129,6 +129,18 @@ import { landingFor, flowForBand, shouldShowReturnScreen, PATHWAY_SKIP_LABEL, DI
 import GradYearCheckIn from './components/GradYearCheckIn';
 import ReturningBreakScreen from './components/ReturningBreakScreen';
 import { summarizeRoadmapForPrompt } from './lib/roadmap/model';
+import { setAiLane, aiLane } from './lib/aiLane';
+// The Common App mirror, split out of the first-load bundle for the same reason the foundations
+// tools and the narrative engine are (see the React.lazy notes above). It pulls the whole
+// section model, the derivation layer and the sync ledger, and it lives behind a gated sub-tab a
+// student only reaches once they have logged an activity or a college — so statically importing
+// it charged every boot for a screen most students have not unlocked yet. The badge strip that
+// appears on the other Portfolio pages stays a normal import: it is small, and it renders on
+// pages a student does reach on day one.
+const CommonAppMirror = React.lazy(() => import('./components/portfolio/CommonAppMirror'));
+import CommonAppMirrorBadge from './components/portfolio/CommonAppMirrorBadge';
+import { useCommonApp } from './lib/commonApp/useCommonApp';
+import { visibleModules as homeModules, focusNote as homeFocusNote, DENSITIES as HOME_DENSITIES } from './lib/dashboardStages';
 import { rollCosmetic } from './lib/cosmetics';
 import { renderMarkdown } from './lib/renderMarkdown';
 import { exportQuizResult, exportFlashDeck, exportPathwayCertificate } from './lib/exportPDF';
@@ -487,6 +499,10 @@ const PORTFOLIO_SUBNAV = [
   {id:'resume',ic:Award,label:'Activities',color:C.amber},
   {id:'opportunities',ic:Trophy,label:'Opportunities',color:C.gold},
   {id:'applying',ic:GraduationCap,label:'Applying',color:C.sky},
+  // The Common App mirror. Sits directly after Applying because it is the thing every panel in
+  // this tab feeds — see src/lib/commonApp/sections.js. Deliberately not first: a student who
+  // opens Portfolio should land on their work, not on the form the work is for.
+  {id:'commonapp',ic:ClipboardList,label:'Common App',color:C.teal},
   // One tab, not two. 'Deadlines' (the dates you type) and 'Timeline' (the dates we generate)
   // were the write half and the read half of the same calendar; splitting them meant a date added
   // on one showed up on the other only after a reload, and the two could disagree about what was
@@ -1710,6 +1726,16 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
   const [cosmetics, setCosmetics] = useState(new Set());
   const [chest, setChest] = useState(null); // { title, eyebrow, xp, cosmetic }
   const upcomingDeadlines = useDeadlines();
+  // ── Who Medabrain requests are budgeted to ─────────────────────────────────
+  // Set here, in the one place that learns who the student is, and read at call time by every
+  // /api/groq caller in the app (see src/lib/aiLane.js). Threading the user object through
+  // nineteen unrelated modules to achieve the same thing would be the worse trade.
+  //
+  // An effect rather than a hook into each setUser_ call site, because the requirement is "the
+  // lane always matches the signed-in student", and an effect on the identity itself is the only
+  // form of that which cannot be forgotten at a new call site. Runs with null on sign-out, which
+  // is the correct value: an unclaimed request is budgeted to the network.
+  useEffect(()=>{ setAiLane(user); },[user?.id,user?.email]);
   const [totalReviews, setTotalReviews] = useState(0);
   const [aiChatCount, setAiChatCount] = useState(0);
   const [interviewCount, setInterviewCount] = useState(0);
@@ -5047,7 +5073,12 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
       r = await fetch('/api/groq', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ system: sys, message: msg, messages: hist, maxTokens: toks, tier, purpose, ...extra }),
+        // `...extra` carries the server-read per-request fields (today safetyTier). `lane` comes
+        // AFTER it deliberately: it identifies the student to the rate-limit budgets, and a caller
+        // passing a lane of its own through `extra` must not be able to charge someone else's
+        // allowance. With no lane at all, every request from one school's NAT shares one budget —
+        // see src/lib/aiLane.js for the failure that produced.
+        body: JSON.stringify({ system: sys, message: msg, messages: hist, maxTokens: toks, tier, purpose, ...extra, lane: aiLane() }),
       });
     } catch {
       throw new Error("Couldn't reach Medabrain — check your connection and try again.");
@@ -5136,6 +5167,61 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
   // the tab because the coach, the Prep specialist and the plan generator all need it and none
   // of them mounts the Roadmap tab — a summary computed where it is rendered would be missing
   // from every surface that matters.
+  // ── The Common App mirror's live state ──────────────────────────────────────
+  // One derivation and one ledger for the whole app: the mirror screen and every panel badge read
+  // this same object, so they cannot disagree about whether a section is ready — the same "one
+  // fetch, one truth" rule the shared portfolio snapshot exists for.
+  //
+  // `persist` merges rather than replacing, because saveUser takes the WHOLE user record. Handing
+  // it a bare { commonApp } would replace the account with a single key.
+  const persistCommonApp=useCallback((ledger)=>{ setUser_(u=>{ if(!u) return u; const next={...u,commonApp:ledger}; DB.saveUser(next).catch(console.error); return next; }); },[]);
+  const commonApp=useCommonApp(user,persistCommonApp,portSnapshot);
+
+  // ── The mirror strip every Portfolio page carries ──────────────────────────
+  // One factory, handed to each scrolling page as a render-prop. A page whose section feeds no
+  // part of the Common App gets null back and renders nothing, which is the honest output —
+  // a neutral badge would read as a check that was performed and passed.
+  // ── What the dashboard leads with ───────────────────────────────────────────
+  // Home renders fourteen modules and six of them are readings of progress a brand-new account
+  // does not have yet — rings at zero, an empty sixty-day horizon, five unearned achievements.
+  // Scrolling past a page of empty measurements of yourself reads as a list of things you are
+  // already behind on, which is the wrong first impression in a damaging and specific way.
+  //
+  // Nothing is removed: every deferred module is still on its own tab right now, and
+  // `homeDensity:'full'` brings them all back permanently. See src/lib/dashboardStages.js for the
+  // ladder and for why it ratchets rather than tracking the data down again.
+  const homeSignals=useMemo(()=>({
+    activities: portActivities.length,
+    clinicalHours: clinicalHoursTotal,
+    deadlines: (upcomingDeadlines||[]).length,
+    colleges: appCounts.colleges,
+    lessonsDone: curPathDoneL,
+    quizzes: qTaken,
+    achievements: achiev.size,
+    streak,
+    scholarships: (portScholarships||[]).length,
+    hasMedexScore: !!medexState?.score,
+    hasRoadmap: !!user?.roadmap,
+  }),[portActivities.length,clinicalHoursTotal,upcomingDeadlines,appCounts.colleges,curPathDoneL,qTaken,achiev.size,streak,portScholarships,medexState,user?.roadmap]);
+  const home=useMemo(()=>homeModules(homeSignals,user?.homeDensity||'auto',user?.homeEarnedModules||[]),
+    [homeSignals,user?.homeDensity,user?.homeEarnedModules]);
+  // Persist newly-earned modules so the ratchet survives a reload — a module that appeared
+  // yesterday must not vanish today because an activity was deleted in between.
+  useEffect(()=>{
+    if(!user||user.homeDensity==='full')return;
+    const known=new Set(user.homeEarnedModules||[]);
+    if(home.earned.every(id=>known.has(id)))return;
+    saveUser({...user,homeEarnedModules:home.earned});
+  },[home.earned,user,saveUser]);
+
+  const commonAppBadgeFor=useCallback((view)=>(sectionId)=>(
+    <CommonAppMirrorBadge
+      tab="portfolio" view={view} section={sectionId}
+      application={commonApp.application} sync={commonApp.sync}
+      onOpenMirror={()=>{ setPortfolioView('commonapp'); play('click'); }}
+    />
+  ),[commonApp.application,commonApp.sync]);
+
   const roadmapSummary=useMemo(()=>{
     try{ return summarizeRoadmapForPrompt(user?.roadmap); }catch{ return null; }
   },[user?.roadmap]);
@@ -6153,6 +6239,48 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
   const dueDeckCount = useMemo(()=>allDecksList.filter(d=>getDueCards(d.cards).length>0).length,[allDecksList]);
 
   /**
+   * Everything with a date on it that the dashboard should treat as a deadline.
+   *
+   * ── The gap this closes ─────────────────────────────────────────────────────
+   * `upcomingDeadlines` is the `deadlines` TABLE — dates the student typed in or saved from a
+   * program card. The Roadmap keeps its year in its own document, and until now the two only met
+   * on the Milestones feed. So a student could accept a competition into their roadmap, see it on
+   * their roadmap, and have the dashboard go on saying there was nothing coming up — the two
+   * surfaces they check most often describing two different calendars.
+   *
+   * Roadmap items are mapped into the row shape the dashboard modules already read rather than
+   * teaching those modules a second shape, so "the next three things" and the sixty-day horizon
+   * both see one calendar without either of them knowing the Roadmap exists.
+   *
+   * ── What is deliberately excluded ───────────────────────────────────────────
+   * An item with no resolvable date, and an item whose date is a catalog ESTIMATE rather than a
+   * real one. The dashboard prints dates as facts; a 'typical' window shown here as "due Nov 14"
+   * would be exactly the invented deadline the whole catalog design exists to prevent. Those
+   * items stay on the Roadmap, where the UI renders them as a window and says so.
+   */
+  const homeDeadlineRows = useMemo(()=>{
+    const rows = [...(upcomingDeadlines || [])];
+    const items = user?.roadmap?.items || [];
+    for (const item of items) {
+      if (item.status === 'done' || item.status === 'skipped') continue;
+      // Only dates we can state as facts — see above.
+      const exact = !!item.studentDate || item.confidence === 'fixed' || item.addedBy === 'student';
+      if (!exact) continue;
+      const date = item.studentDate || item.due || item.on || item.anchor;
+      if (!date) continue;
+      rows.push({
+        id: `roadmap:${item.id}`,
+        title: item.title,
+        due_date: date,
+        completed_at: null,
+        kind: item.track === 'competition' ? 'competition' : item.track === 'scholarship' ? 'scholarship' : 'other',
+        source: 'roadmap',
+      });
+    }
+    return rows;
+  },[upcomingDeadlines,user?.roadmap]);
+
+  /**
    * The three things — the dashboard's first and most prominent module.
    *
    * Ranked by urgency × impact over deadlines, the next unstarted lesson, the
@@ -6171,7 +6299,7 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
    */
   const nextThreeItems = useMemo(()=>nextThree({
     gradeBand, gradeStage: effGrade,
-    deadlines: upcomingDeadlines || [],
+    deadlines: homeDeadlineRows,
     nextLesson, doneLessons: curPathDoneL, totalLessons: curPathAllL.length,
     hours: dashboardHours, benchmarks,
     dueCards, dueDecks: dueDeckCount,
@@ -6180,7 +6308,7 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
       activities: (portSnapshot?.activities||portActivities||[]).length,
       essays: appCounts.essays,
     } : undefined,
-  }),[gradeBand,effGrade,upcomingDeadlines,nextLesson,curPathDoneL,curPathAllL.length,
+  }),[gradeBand,effGrade,homeDeadlineRows,nextLesson,curPathDoneL,curPathAllL.length,
       dashboardHours,benchmarks,dueCards,dueDeckCount,portLoaded,recommendersCount,
       appCounts,portSnapshot,portActivities]);
   // ── Medabrain plan spotlight ─────────────────────────────────────────────────
@@ -6378,30 +6506,30 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
             Hours by category against the active pathway's own benchmarks. This
             is the substance framing in its purest form: four fractions, each
             legible to a seventeen-year-old and to an admissions officer. */}
-        <HoursRings
+        {home.visible.has('hoursRings')&&<HoursRings
           hours={dashboardHours}
           benchmarks={benchmarks}
           pathwayLabel={curPath?.label||'your pathway'}
           onLogHours={()=>{goPortfolio('activities');play('click');}}
           accent={C.green}
           m={isMobile}
-        />
+        />}
 
         {/* ═══ 4 · DEADLINE HORIZON ════════════════════════════════════════════
             Sixty days, colored by when work has to START rather than when it
             is due — the first rung of the app's own 60/30/7 alert ladder. */}
-        <DeadlineHorizon
-          deadlines={upcomingDeadlines||[]}
+        {home.visible.has('deadlineHorizon')&&<DeadlineHorizon
+          deadlines={homeDeadlineRows}
           onOpen={()=>{goPortfolio('milestones');play('click');}}
           onOpenAll={()=>{goPortfolio('milestones');play('click');}}
           accent={C.rose}
           m={isMobile}
-        />
+        />}
 
         {/* ═══ 5 · PROGRESS DETAIL ═════════════════════════════════════════════
             Track completion, quiz trend by topic, flashcard retention, practice
             test trend. Ordered by how quickly a student can move each one. */}
-        <ProgressDetail
+        {home.visible.has('progressDetail')&&<ProgressDetail
           trackLabel={curPath?.label||'your pathway'}
           lessonsDone={curPathDoneL}
           lessonsTotal={curPathAllL.length}
@@ -6413,14 +6541,14 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
           testScores={portSnapshot?.testScores||[]}
           accent={accent}
           m={isMobile}
-        />
+        />}
 
         {/* ═══ 6 · ACHIEVEMENTS, WEIGHTED BY SUBSTANCE ═════════════════════════
             Five milestones that each name something true about the student
             outside this app, and — under them, small, once, and nowhere else in
             the product — the streak. See the component header for why the
             streak is deliberately not a headline. */}
-        <SubstanceAchievements
+        {home.visible.has('achievements')&&<SubstanceAchievements
           context={{
             shadowingHours: dashboardHours.shadowing,
             certifications: skillsCount,
@@ -6436,7 +6564,7 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
           accent={C.amber}
           m={isMobile}
           reducedMotion={reducedMotion}
-        />
+        />}
 
         {/* ── Supporting surfaces ──────────────────────────────────────────────
             Everything below the six modules is a shortcut into work that lives
@@ -6450,13 +6578,13 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
         {/* The MedEx Score — the one remaining block about the outside world.
             It seals weekly, so unlike everything above it is deliberately not a
             today-shaped number. */}
-        <MedExHomeCard
+        {home.visible.has('medex')&&<MedExHomeCard
           state={medexState}
           onOpen={()=>goPortfolio('medex')}
           onGoTo={goMedexDimension}
           m={isMobile}
           reducedMotion={reducedMotion}
-        />
+        />}
 
         {/* Today's plan, if one has been generated. Distinct from module 1: the
             plan is what the student committed to, the next three is what the
@@ -6490,7 +6618,7 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
         {/* The Roadmap's single most urgent twelve-month item — nearly always
             something whose preparation starts now for a date months away, which
             is the half of the question module 4's sixty-day window cannot see. */}
-        {unlocks.isOpen('roadmap')&&(
+        {home.visible.has('roadmapCard')&&unlocks.isOpen('roadmap')&&(
           <RoadmapHomeCard
             user={user} isMobile={isMobile}
             onOpen={()=>goRoadmap('overview')}
@@ -6518,12 +6646,12 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
         {/* Financial aid & scholarships — every tracked scholarship one glance
             from the dashboard rather than three taps into Portfolio. Hidden
             entirely when nothing is tracked. */}
-        <FinancialAidHomeCard scholarships={portScholarships} accent={C.green} onOpen={()=>goPortfolio('aid')}/>
+        {home.visible.has('financialAid')&&<FinancialAidHomeCard scholarships={portScholarships} accent={C.green} onOpen={()=>goPortfolio('aid')}/>}
 
         {/* Quick actions, filtered through the unlock ladder like every other
             route into the app — a shortcut to a screen the nav has deliberately
             not shown yet is the wall of options rebuilt on the dashboard. */}
-        <div>
+        {home.visible.has('quickActions')&&<div>
           <SL>Quick Actions</SL>
           <div style={G(3,14,{},isMobile)}>
             {[
@@ -6546,13 +6674,40 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
               </motion.div>
             ))}
           </div>
-        </div>
+        </div>}
 
         {/* What opens next — the unlock ladder stated in full, in the one place
             a new student actually starts. Disappears once nothing is left. */}
         {unlocks.locked().length>0&&(
           <NextUnlockCard items={unlocks.locked()} variant="card" accent={C.violet}/>
         )}
+
+        {/* ── What this page is not showing yet ────────────────────────────────
+            The dashboard is deliberately a reduced view for a new account (see
+            src/lib/dashboardStages.js), and this card is what keeps that honest. It
+            names every module being held back and what each one would add, and it offers
+            the switch — because deciding for someone what they are ready to see, with no
+            way to disagree, is its own kind of condescension. Disappears the moment
+            nothing is deferred. */}
+        {home.isFocused&&(()=>{
+          const note=homeFocusNote(home.deferred);
+          if(!note)return null;
+          return (
+            <div style={{...glass({padding:20}),border:`1px solid ${tint(C.violet,0.18)}`,background:`linear-gradient(135deg,${tint(C.violet,0.05)},transparent 60%)`}}>
+              <SectionTitle icon={Sparkles} color={C.violetL}>{note.title}</SectionTitle>
+              <p style={{fontSize:12.5,color:C.t2,lineHeight:1.6,margin:'0 0 12px'}}>{note.body}</p>
+              <ul style={{margin:'0 0 16px',paddingLeft:24}}>
+                {note.items.map((it,i)=>(
+                  <li key={i} style={{fontSize:11.5,color:C.t3,lineHeight:1.55,marginBottom:4}}>{it}</li>
+                ))}
+              </ul>
+              <button onClick={()=>{saveUser({...user,homeDensity:'full'});play('click');toast('Everything is on your dashboard now. You can go back to the focused view in Settings.',{icon:'✨',duration:5000});}}
+                style={{...btnG({fontSize:12,padding:'8px 16px'}),display:'inline-flex',alignItems:'center',gap:8}}>
+                Show me all of it anyway<ChevronRight size={12}/>
+              </button>
+            </div>
+          );
+        })()}
       </div>
     );
   }
@@ -9681,6 +9836,44 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
               </button>
             </div>
           </div>
+
+          {/* ── The same escape hatch, one level down ──────────────────────────
+              The switch above decides which TABS exist; this one decides how much of the
+              dashboard leads with progress readings. They are separate because they answer
+              separate complaints: "I cannot find anything" and "the first thing I see is a
+              page of zeros about me". A student can want either fix without the other.
+              Both are reversible and neither ever hides data — every deferred module is on
+              its own tab the whole time. See src/lib/dashboardStages.js. */}
+          <div style={glass({padding:16,marginTop:12})}>
+            <div style={R({justifyContent:'space-between',gap:16,flexWrap:'wrap'})}>
+              <div style={{flex:1,minWidth:240}}>
+                <SL extra={{marginBottom:4}}>Dashboard modules</SL>
+                <p style={{fontSize:12.5,color:C.t3,lineHeight: 1.55,margin:0}}>
+                  {user.homeDensity==='full'
+                    ? <>Your dashboard shows every module, including ones with nothing in them yet.</>
+                    : <>Your dashboard shows a module once there is something for it to measure — hours once you log an activity, deadlines once you have one. Nothing is hidden: all of it is on its own tab right now.</>}
+                </p>
+                {user.homeDensity!=='full'&&home.deferred.length>0&&(
+                  <div style={{fontSize:11.5,color:C.t4,marginTop:8,fontFamily:C.FM}}>
+                    {home.deferred.length} module{home.deferred.length===1?'':'s'} waiting on data
+                  </div>
+                )}
+              </div>
+              <button
+                role="switch"
+                aria-checked={user.homeDensity==='full'}
+                onClick={()=>{
+                  const on=user.homeDensity!=='full';
+                  saveUser({...user,homeDensity:on?'full':'auto'});
+                  play('select');
+                  toast.success(on?'Showing every dashboard module.':'Back to a dashboard that grows with you — nothing you have earned goes away.');
+                }}
+                style={{...(user.homeDensity==='full'?btn(accentGrad(accent),{fontSize:12,padding:'8px 16px'}):btnG({fontSize:12,padding:'8px 16px'})),flexShrink:0}}
+              >
+                {user.homeDensity==='full'?<><Check size={14}/>Showing all modules</>:<><Layers size={14}/>Show all modules</>}
+              </button>
+            </div>
+          </div>
         </Group>
         </>}
 
@@ -10548,6 +10741,7 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
     // saveUser, so a student's interests live on their account, not on one device.
     opportunities:()=>(
       <SectionScroller accent={portC.opportunities} isMobile={isMobile}
+        mirrorBadge={commonAppBadgeFor('opportunities')}
         focusId={sectionFor('opportunities')} focusNonce={sectionNonce}
         defaultOpenIds={['find']} printLabel="Print this page"
         sections={[
@@ -10574,6 +10768,7 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
     // was a tab, so adding a college still moves the counters, a finished interview still credits
     // the streak, and every old /portfolio/essays URL still lands on the essay workspace.
     applying:()=><ApplyingPanel accent={portC.applying} isMobile={isMobile}
+      mirrorBadge={commonAppBadgeFor('applying')}
       focusId={sectionFor('applying')} focusNonce={sectionNonce}
       onSectionOpen={(id)=>focusPortfolioSection('applying',id)}
       sectionLocks={applyingSectionLocks}
@@ -10608,7 +10803,34 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
     // callback the four separate panels had is still wired, one per section, so logging clinical
     // hours still moves the readiness gauge and the achievement counters exactly as it did when
     // it was its own tab.
+    // The Common App mirror — the whole real form with this student's Portfolio in it, plus the
+    // ledger that tracks which parts of it they have actually copied across. See
+    // src/lib/commonApp/ for the model, the derivation and the sync.
+    commonapp:()=>(
+      <React.Suspense fallback={
+        <div style={{...glass({padding:40}), display:'flex', justifyContent:'center'}}>
+          <Loader2 size={20} style={{animation:'spin 1s linear infinite', color:C.t3}}/>
+        </div>
+      }>
+      <CommonAppMirror
+      application={commonApp.application} sync={commonApp.sync} actions={commonApp.actions}
+      loading={!portLoaded||portSnapLoading} isMobile={isMobile}
+      // Set the view and focus the section separately rather than pushing the section id through
+      // goPortfolio. That helper resolves RETIRED tab ids ('essays' → applying:essays) and passes
+      // anything it does not recognize straight to setPortfolioView — so a live section id that is
+      // not also an old tab id, like the opportunities finder's 'find', would have been set as a
+      // portfolio view that does not exist and quietly landed the student on Overview.
+      onNavigate={(src)=>{
+        if(!src?.tab) return;
+        if(src.tab!=='portfolio') return goAnywhere(src.tab, src.view);
+        setTab('portfolio');
+        if(src.view) setPortfolioView(src.view);
+        if(src.view&&src.section) focusPortfolioSection(src.view, src.section);
+      }}/>
+      </React.Suspense>
+    ),
     resume:()=><ActivitiesResumePanel accent={portC.resume} user={user} gradeLabel={gradeLabel} isMobile={isMobile}
+      mirrorBadge={commonAppBadgeFor('resume')}
       portfolioSnapshot={portSnapshot} pathwayLabel={PATHS[eSpec]?.label||null}
       section={sectionFor('resume')} sectionNonce={sectionNonce}
       onSectionChange={(id)=>focusPortfolioSection('resume',id)} sectionLocks={resumeSectionLocks}

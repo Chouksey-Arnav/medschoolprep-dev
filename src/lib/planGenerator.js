@@ -12,6 +12,7 @@ import {
   WHY_MEDICINE_OPTIONS, DREAM_ROLE_OPTIONS, CERTAINTY_OPTIONS, GPA_OPTIONS,
   SCIENCE_OPTIONS, EXPERIENCE_OPTIONS,
 } from '../components/onboarding/Onboarding';
+import { aiLane } from './aiLane.js';
 
 // Nothing in here mentions the SAT/ACT. The test-prep pillar is sealed for v1
 // (src/lib/betaFlags.js), so onboarding no longer collects a track, a score or
@@ -250,7 +251,7 @@ async function attemptPlan(system, user) {
     const r = await fetch('/api/groq', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ system, message: user, maxTokens: 1400, purpose: 'plan' }),
+      body: JSON.stringify({ system, message: user, maxTokens: 1400, purpose: 'plan', lane: aiLane() }),
       signal: controller ? controller.signal : undefined,
     });
     if (!r.ok) return null;

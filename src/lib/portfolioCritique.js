@@ -36,6 +36,7 @@
 import { HONEST_MENTOR_STANCE, PERSONA_GUARDRAIL, getDreamRoleLabel, getWhyMedicineLabel } from './studentProfile';
 import { hoursPerYear, scoreActivity, analyzeSlate, PILLARS } from './activityIntel';
 import { analyzeAcademics, gpaBand, gpaPercentileContext, roleProfile, recommendByAcademics } from './academicIntel';
+import { aiLane } from './aiLane.js';
 
 // ── Shared framing ───────────────────────────────────────────────────────────
 const READER_FRAME = `You are Medabrain, the Portfolio Intelligence specialist inside MedSchoolPrep, reading a high-school student's activities and academic record the way an admissions officer with forty more files to get through actually reads them.
@@ -328,7 +329,7 @@ export async function runPortfolioRead({ system, message, maxTokens = 1400, sign
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      system, message, purpose: 'portfolio', tier: 'sage',
+      system, message, purpose: 'portfolio', tier: 'sage', lane: aiLane(),
       maxTokens, temperature: 0.4, noCache: true,
     }),
     signal,

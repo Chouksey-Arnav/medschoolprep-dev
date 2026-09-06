@@ -12,8 +12,9 @@
 // parts where a tool can be unambiguously useful.
 //
 // ── The app already has a Common App exporter ──────────────────────────────
-// src/lib/commonApp.js and src/components/portfolio/CommonAppExport.jsx build
-// and export the list. This module does not export anything and does not own
+// src/lib/commonApp/ and src/components/portfolio/CommonAppExport.jsx build
+// and export the list (the exporter itself is commonApp/activities.js; the
+// section model, derivation and Portfolio sync ledger sit beside it). This module does not export anything and does not own
 // the data; it AUDITS a draft against the rules and hands back per-entry
 // findings. The two are wired together in the panel rather than merged, because
 // the exporter's job is to be correct and this one's job is to be opinionated.

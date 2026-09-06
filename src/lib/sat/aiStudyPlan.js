@@ -34,6 +34,7 @@ import { SAT_SKILLS, skillMeta } from '../../data/sat/taxonomy';
 import { renderProfileForPrompt, profileFingerprint } from './learnerProfile';
 import { parseJsonLoosely } from './aiPractice';
 import * as DB from '../db';
+import { aiLane } from '../aiLane.js';
 
 const PLAN_CACHE_PREFIX = 'plan:v1';
 /** A plan older than this is stale advice, whatever the profile says. */
@@ -215,6 +216,7 @@ export async function generateSatStudyPlan(profile, { fresh = false, signal = nu
         system: buildPlanPrompt(profile),
         message: 'Write this student\'s SAT study plan now. Return the JSON object and nothing else.',
         purpose: 'sat',
+        lane: aiLane(),
         tier: 'oracle',
         reasoningEffort: 'high',
         jsonMode: true,
