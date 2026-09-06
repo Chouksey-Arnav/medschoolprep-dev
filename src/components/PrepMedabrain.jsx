@@ -11,6 +11,10 @@ import CrisisResourceCard from './safety/CrisisResourceCard';
 import { renderMarkdown } from '../lib/renderMarkdown';
 import MedabrainLauncher from './MedabrainLauncher';
 import { aiLane } from '../lib/aiLane';
+// The tutoring slice of the student-intelligence tables, fetched once per session and shared with
+// the SAT panel. See src/lib/studentIntel/store.js — a failed load is never allowed to cost the
+// student a send, so it resolves to an empty digest rather than rejecting.
+import { getStudentIntel } from '../lib/studentIntel/store';
 
 const LESSON_SUGGESTIONS = [
   'Explain this a different way',
@@ -82,6 +86,7 @@ export default function PrepMedabrain({
     setLoading(true);
     try {
       const safety = await runSafetyPass(trimmed, { surface: 'prep' });
+      const studentIntel = await getStudentIntel().catch(() => null);
       const sys = buildPrepSystemPrompt({
         user, pathwayLabel, gradeLabel,
         lesson, unit, articleSections, keyTakeaways, objectives, unitTitles, lessonNote,
@@ -90,6 +95,7 @@ export default function PrepMedabrain({
         lessonHighlights, notesDigest, highlightsDigest, feedbackSummary, paceText,
         parallelPathwaysSummary,
         safetyBlock: safety.block,
+        studentIntel: studentIntel ? { ...studentIntel, gradeLabel } : null,
       });
       const res = await fetch('/api/groq', {
         method: 'POST',

@@ -16,8 +16,13 @@ import { OPPORTUNITIES, OPPORTUNITY_TYPES } from '../../data/opportunities';
 import {
   INTEREST_THEMES, THEME_BY_ID, EFFORT_APPETITES, COST_STANCES, FORMAT_PREFS,
   buildMatchProfile, matchOpportunities, buildMatchPrompt, readPrefs, writePrefs, themeReach,
-  PIPELINE_STAGES, ACTIVE_STAGES,
+  PIPELINE_STAGES, ACTIVE_STAGES, grantLocalMatchConsent, revokeLocalMatchConsent,
 } from '../../lib/opportunityMatch';
+import LocalMatchConsent from './LocalMatchConsent';
+import ServiceLogPanel from './ServiceLogPanel';
+import QuickCapture from './QuickCapture';
+import WeeklyCheckin, { WeeklyCheckinHistory } from './WeeklyCheckin';
+import ProfileIntelPrompt from './ProfileIntelPrompt';
 import { trackTargetForOpportunity, resourceForOpportunity, catalogDedupeKey } from '../../lib/trackingCatalog';
 import { TierLegend, DeadlineBoard, HosaTracker } from './ProgramTiers';
 import ProgramExplorer from './ProgramExplorer';
@@ -272,6 +277,10 @@ export default function OpportunitiesPanel({
 
   return (
     <div style={CC({ gap: 20 })}>
+      <ProfileIntelPrompt accent={C.violet} isMobile={isMobile} />
+
+      <WeeklyCheckin accent={C.blue} isMobile={isMobile} />
+
       <PanelHero tourTag="portfolio-deep-opportunities" icon={Trophy} color={C.gold} color2={C.orange} m={isMobile}
         eyebrow="Opportunities" title="Things you could actually go do"
         sub={`${OPPORTUNITIES.length} real programs — competitions, research, volunteering, leadership and summer programs. We put the ones that fit you first.`}
@@ -569,6 +578,16 @@ export default function OpportunitiesPanel({
       {/* ── 3c. HOSA ────────────────────────────────────────────────────────
           A chapter member's question is "which event do I enter", and the
           answer lives in a PDF nobody opens. */}
+      <QuickCapture accent={C.violet} isMobile={isMobile} />
+
+      <ServiceLogPanel accent={C.rose} isMobile={isMobile} />
+
+      <WeeklyCheckinHistory accent={C.blue} isMobile={isMobile} />
+
+      <LocalMatchConsent prefs={prefs} isMobile={isMobile}
+        onGrant={(loc) => onSaveUser?.(grantLocalMatchConsent(user, loc))}
+        onRevoke={() => onSaveUser?.(revokeLocalMatchConsent(user))} />
+
       <Disclosure id="opportunities-hosa" icon={Trophy} color={C.teal} m={isMobile}
         title="HOSA competitive events — and which ones you've qualified for"
         sub="Every event, in HOSA's own categories, with a place to track how far you have got.">

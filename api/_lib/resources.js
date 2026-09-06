@@ -56,6 +56,19 @@ export const RESOURCES = [
   // their own history on every plan, including one they have cancelled.
   'narrative_profile',
   'narrative_runs',
+  // The durable student-intelligence layer (supabase/migrations/0026_student_intelligence.sql).
+  // Listed here like every other resource so it is exportable and deletable with the account —
+  // see api/data/[resource].js for the WRITABLE column lists and the provenance ('source') column
+  // every one of these tables carries.
+  'school_context',
+  'constraints_profile',
+  'quick_notes',
+  'interest_history',
+  'service_logs',
+  'competitions',
+  'checkins',
+  'recommendation_feedback',
+  'activity_role_history',
 ];
 
 /** Membership test for the CRUD endpoint's `[resource]` path segment. */

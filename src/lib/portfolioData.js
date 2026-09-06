@@ -51,6 +51,20 @@ const RESOURCE_MAP = {
   // the Home card and the breakdown panel could seal against two different
   // reads of the portfolio and disagree about the week's number.
   medex_scores: 'medexScores',
+  // The durable student-intelligence layer (supabase/migrations/0026_student_intelligence.sql).
+  // Fetched with the rest of the snapshot so buildStudentIntelBlock() (src/lib/studentIntel/
+  // context.js) can be fed from data Portfolio already loaded, rather than firing a second round
+  // of requests just for Medabrain's context.
+  school_context: 'schoolContext',
+  constraints_profile: 'constraintsProfile',
+  quick_notes: 'quickNotes',
+  interest_history: 'interestHistory',
+  service_logs: 'serviceLogs',
+  competitions: 'competitions',
+  reflection_entries: 'reflectionsLog',
+  checkins: 'checkins',
+  recommendation_feedback: 'recommendationFeedback',
+  activity_role_history: 'activityRoleHistory',
 };
 
 export const EMPTY_SNAPSHOT = Object.freeze({

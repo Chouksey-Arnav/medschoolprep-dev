@@ -637,6 +637,19 @@ export const DEFAULT_PREFS = Object.freeze({
   // hides real opportunities silently, which is the worst failure mode there
   // is, so it stays null until the student says.
   homeState: null,
+  // ── Local opportunity matching consent (optional, revocable) ────────────────
+  // Deliberately separate from `homeState` above, which is an eligibility filter the student
+  // enters as part of normal tuning. This pair exists specifically so ZIP/state can additionally
+  // be used to surface NEARBY activities/volunteer roles/programs/internships/competitions, and
+  // only when the student has explicitly opted in — see the "Local opportunity matching" card in
+  // OpportunitiesPanel.jsx. `zipCode` and `localMatchState` are never read by anything unless
+  // `localMatchConsent` is true; turning consent off is what "revoking" means, and nothing in the
+  // app should read these two fields while it is false.
+  localMatchConsent: false,
+  localMatchConsentAt: null,
+  localMatchConsentRevokedAt: null,
+  zipCode: null,
+  localMatchState: null,
   // programId -> PIPELINE_STAGES id.
   stages: {},
   // eventId -> level id, for the HOSA competitive events a student is chasing
@@ -660,6 +673,13 @@ export function readPrefs(user) {
     gradeStage: GRADE_KEYS.includes(raw.gradeStage) ? raw.gradeStage : DEFAULT_PREFS.gradeStage,
     hosa: (raw.hosa && typeof raw.hosa === 'object' && !Array.isArray(raw.hosa)) ? raw.hosa : {},
     homeState: /^[A-Z]{2}$/.test(String(raw.homeState || '').toUpperCase()) ? String(raw.homeState).toUpperCase() : null,
+    localMatchConsent: !!raw.localMatchConsent,
+    localMatchConsentAt: raw.localMatchConsentAt || null,
+    localMatchConsentRevokedAt: raw.localMatchConsentRevokedAt || null,
+    // Never trust a stored ZIP/state for matching once consent is false, even if the raw values
+    // are still sitting on the record — see the field comment on DEFAULT_PREFS above.
+    zipCode: raw.localMatchConsent && /^\d{5}$/.test(String(raw.zipCode || '')) ? String(raw.zipCode) : (raw.zipCode || null),
+    localMatchState: /^[A-Z]{2}$/.test(String(raw.localMatchState || '').toUpperCase()) ? String(raw.localMatchState).toUpperCase() : null,
     // Anything not a real stage id is dropped rather than kept: a stale value
     // from an older build would otherwise render as a blank chip forever.
     stages: Object.fromEntries(
@@ -679,4 +699,32 @@ export function stageCounts(stages = {}) {
 /** A new user object with `patch` merged into the saved prefs. Never mutates. */
 export function writePrefs(user, patch) {
   return { ...(user || {}), [PREFS_KEY]: { ...readPrefs(user), ...patch } };
+}
+
+/**
+ * The ONE place anything in the app may read a student's ZIP/state for local-opportunity
+ * matching. Returns null unless the student explicitly opted in — a caller that reaches for
+ * `prefs.zipCode` directly instead of this function is exactly the bug this exists to prevent.
+ */
+export function usableLocation(prefs) {
+  if (!prefs?.localMatchConsent) return null;
+  if (!prefs.zipCode && !prefs.localMatchState) return null;
+  return { zipCode: prefs.zipCode || null, state: prefs.localMatchState || null };
+}
+
+/** Turns local-opportunity-matching consent on, stamping when. Never infers ZIP/state itself. */
+export function grantLocalMatchConsent(user, { zipCode = null, state = null } = {}) {
+  return writePrefs(user, {
+    localMatchConsent: true, localMatchConsentAt: new Date().toISOString(), localMatchConsentRevokedAt: null,
+    zipCode, localMatchState: state,
+  });
+}
+
+/**
+ * Revokes consent. Deliberately does NOT delete the stored ZIP/state — the student may want to
+ * turn matching back on later without retyping — it only flips the flag every consumer must
+ * check, which is what "stop using it for matching" means everywhere else in this file.
+ */
+export function revokeLocalMatchConsent(user) {
+  return writePrefs(user, { localMatchConsent: false, localMatchConsentRevokedAt: new Date().toISOString() });
 }

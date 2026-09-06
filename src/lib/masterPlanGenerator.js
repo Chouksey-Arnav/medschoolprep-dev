@@ -50,6 +50,11 @@ import {
 import { deriveLoad } from './planGenerator';
 import { gradeStageFor } from './gradeBand';
 import { aiLane } from './aiLane.js';
+// The student-intelligence derivations. Imported rather than recomputed so the plan digest, the
+// coach prompt and the Service panel all describe the same hours in the same terms — and so the
+// "self-reported, never verified" framing lives in exactly one place.
+import { serviceSummary } from './studentIntel/serviceAnalytics';
+import { currentInterests, directionChanges, SUPPRESS_STATUSES } from './studentIntel/context';
 
 const labelOf = (opts, v) => opts.find(o => o.value === v)?.label || null;
 const labelsOf = (opts, arr) => (arr || []).map(v => labelOf(opts, v)).filter(Boolean);
@@ -215,10 +220,16 @@ export function buildResourceCatalog(specialtyKey, gradeStage = null, pathwaySta
 // by slicing mid-sentence.
 const PROFILE_FACTS_BUDGET = 14000;
 
+// Every category the planner can see, named even when empty — see property 1 above. The
+// student-intelligence categories (supabase/migrations/0026_student_intelligence.sql) belong here
+// for exactly that reason: "no service hours logged" and "service hours were never considered"
+// must not look the same to the model.
 const DEFAULT_PORTFOLIO = {
   colleges: [], essays: [], deadlines: [], scholarships: [], activities: [], research: [],
   skills: [], clinicalHours: [], recommenders: [], testScores: [], awards: [], gpaEntries: [],
   collegeChecklist: [], admissionIntake: [],
+  schoolContext: [], constraintsProfile: [], quickNotes: [], interestHistory: [], serviceLogs: [],
+  competitions: [], checkins: [], recommendationFeedback: [], activityRoleHistory: [],
 };
 const daysSince = (ts) => {
   if (!ts) return null;
@@ -236,6 +247,8 @@ function buildPortfolioFactsText(portfolio) {
     colleges, essays, deadlines, scholarships, activities,
     research, skills, clinicalHours, recommenders, testScores, awards, gpaEntries, collegeChecklist,
     admissionIntake,
+    schoolContext, constraintsProfile, quickNotes, interestHistory, serviceLogs,
+    competitions, checkins, recommendationFeedback, activityRoleHistory,
   } = p;
   const today = todayStr();
   const lines = [];
@@ -370,6 +383,112 @@ function buildPortfolioFactsText(portfolio) {
     lines.push(`Admissions Calculator intake: ${answered} field(s) answered${intake.citizenship ? '' : ', citizenship not answered (so eligibility for combined-degree programs cannot be checked)'}.`);
   } else {
     lines.push('Admissions Calculator intake not started, so no program eligibility has been checked.');
+  }
+
+  // ── The student-intelligence layer ───────────────────────────────────────
+  // Summarized, never dumped: these tables are append-only logs and the whole digest lives under
+  // PROFILE_FACTS_BUDGET, so each one contributes a line or two at the same density as the
+  // clinical-hours summary above.
+
+  // Recommendation feedback is the highest-value row in this whole section: it is the only record
+  // of the student saying no. A plan that re-proposes a program somebody has already told us they
+  // cannot afford or cannot reach is a plan they stop reading.
+  const suppressed = recommendationFeedback.filter(f => SUPPRESS_STATUSES.has(f.status));
+  const wantsHelp = recommendationFeedback.filter(f => f.status === 'needs_help');
+  if (suppressed.length) {
+    lines.push(`ALREADY TURNED DOWN by this student — do NOT schedule, propose or re-suggest any of these, and do not offer a near-identical substitute without saying why it is different: ${suppressed.slice(0, 10).map(f => `"${f.item_label}" (${String(f.status).replace(/_/g, ' ')}${f.note ? `: ${String(f.note).slice(0, 60)}` : ''})`).join('; ')}${suppressed.length > 10 ? `, +${suppressed.length - 10} more` : ''}.`);
+  }
+  if (wantsHelp.length) {
+    lines.push(`They explicitly asked for help with: ${wantsHelp.slice(0, 5).map(f => `"${f.item_label}"`).join('; ')} — these are the opportunities to build real tasks around.`);
+  }
+
+  // Service hours. Self-reported throughout: the student typed these in, nobody checked them,
+  // and the plan must never describe them as verified.
+  if (serviceLogs.length) {
+    const svc = serviceSummary(serviceLogs);
+    const orgs = Object.keys(svc.byOrg || {});
+    const causes = Object.keys(svc.causeConcentration?.byHours || {});
+    const lastService = serviceLogs.map(r => r.entry_date).filter(Boolean).sort().at(-1);
+    const svcGap = lastService ? daysBetween(lastService, today) : null;
+    lines.push(`Self-reported service/volunteer hours (student-logged, never externally verified): ~${Math.round(svc.total)} hour(s) across ${plural(orgs.length, 'organization')}${orgs.length ? ` (${orgs.slice(0, 4).join(', ')})` : ''}${causes.length ? `, cause areas: ${causes.slice(0, 4).join(', ')}` : ''}${Number.isFinite(svcGap) ? `; most recent entry ${svcGap}d ago` : ''}.`);
+  } else {
+    lines.push('No service/volunteer hours logged yet (Service Log is empty) — that is a gap in the log, not proof they have done none.');
+  }
+
+  // Constraints. ZIP and state are stripped upstream in PlansTab.jsx's stripUnconsentedLocation()
+  // and must never be reintroduced here — they are consented for opportunity matching only, and
+  // everything in this digest is sent to a third-party AI provider.
+  const constraints = constraintsProfile[0];
+  if (constraints) {
+    const cBits = [];
+    if (constraints.time_availability) cBits.push(`time available: ${String(constraints.time_availability).slice(0, 140)}`);
+    if (constraints.transportation_limits) cBits.push(`transportation: ${String(constraints.transportation_limits).slice(0, 140)}`);
+    if (constraints.cost_sensitivity) cBits.push(`cost sensitivity: ${String(constraints.cost_sensitivity).slice(0, 140)}`);
+    if (constraints.accessibility_notes) cBits.push(`accessibility/family notes: ${String(constraints.accessibility_notes).slice(0, 140)}`);
+    if (constraints.family_constraints) cBits.push(`family responsibilities: ${String(constraints.family_constraints).slice(0, 140)}`);
+    if (cBits.length) lines.push(`Constraints they have told us about — every task scheduled has to be doable inside these, and never mention the accessibility or family notes back to them unprompted: ${cBits.join('; ')}.`);
+  } else {
+    lines.push('No constraints profile filled in yet, so their real time, transport and cost limits are unknown — keep tasks modest rather than assuming they are free.');
+  }
+
+  // School context. A schedule critique is worthless without knowing what the school offers.
+  const school = schoolContext[0];
+  if (school) {
+    const sBits = [];
+    if (school.graduation_year) sBits.push(`graduating ${school.graduation_year}`);
+    if (school.school_type) sBits.push(`${school.school_type} school`);
+    const rigor = school.rigor_available && typeof school.rigor_available === 'object' ? school.rigor_available : {};
+    const rigorOn = Object.entries(rigor).filter(([, v]) => v).map(([k]) => k.toUpperCase());
+    if (rigorOn.length) sBits.push(`rigor their school actually offers: ${rigorOn.join(', ')}`);
+    else if (Object.keys(rigor).length) sBits.push('their school offers no AP/IB/dual-enrollment, so never plan a course it does not have');
+    if (school.current_courses?.length) sBits.push(`currently taking ${school.current_courses.slice(0, 8).join(', ')}`);
+    if (school.workload_notes) sBits.push(`on their workload, in their words: "${String(school.workload_notes).slice(0, 160)}"`);
+    if (sBits.length) lines.push(`School context: ${sBits.join('; ')}.`);
+  } else {
+    lines.push('No school context logged yet (graduation year, what rigor their school offers, current courses).');
+  }
+
+  // Interests. The most recent statement per category wins; a change of direction is exploration,
+  // worth planning around rather than treating as a contradiction.
+  if (interestHistory.length) {
+    const current = currentInterests(interestHistory);
+    const currentLines = Object.values(current).filter(r => r.status !== 'past').map(r => `${r.category || 'interest'}: "${r.interest}"`);
+    if (currentLines.length) lines.push(`Current stated interests (their most recent statement in each category — this supersedes anything older): ${currentLines.slice(0, 6).join('; ')}.`);
+    const changed = directionChanges(interestHistory);
+    if (changed.length) lines.push(`Their direction has shifted in ${changed.slice(0, 3).map(c => `${c.category} (from "${c.from}" to "${c.to}")`).join(', ')} — plan for where they are now, and never hold the earlier answer against them.`);
+  } else {
+    lines.push('No interest history logged yet.');
+  }
+
+  lines.push(competitions.length
+    ? `Competitions/submissions logged (${competitions.length}): ${competitions.slice(0, 5).map(c => `"${c.title}"${c.result ? ` (${c.result}${c.placement ? `, ${c.placement}` : ''})` : ''}`).join('; ')}${competitions.length > 5 ? `, +${competitions.length - 5} more` : ''}.`
+    : 'No competitions or submissions logged yet.');
+
+  if (activityRoleHistory.length) {
+    const byActivity = {};
+    for (const r of activityRoleHistory) (byActivity[r.activity_label || r.activity_id || 'an activity'] ||= []).push(r);
+    const progression = Object.entries(byActivity).slice(0, 4).map(([label, rows]) => {
+      const sorted = [...rows].sort((a, b) => String(a.started_on || a.created_at || '').localeCompare(String(b.started_on || b.created_at || '')));
+      const path = sorted.map(r => r.role).filter(Boolean);
+      return `${label}: ${path.length > 1 ? path.join(' → ') : (path[0] || 'role not named')}`;
+    });
+    lines.push(`Role progression inside their activities (real evidence of growing responsibility, worth building on rather than starting something new): ${progression.join('; ')}.`);
+  } else {
+    lines.push('No role changes logged inside any activity yet.');
+  }
+
+  // Their own words, last. Most recent wins — see the "corrections take precedence" rule in
+  // src/lib/studentIntel/context.js.
+  const recentNotes = [...quickNotes].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 3);
+  const recentCheckins = [...checkins].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 2);
+  if (recentNotes.length || recentCheckins.length) {
+    const own = [
+      ...recentNotes.map(n => `"${String(n.raw_text || '').slice(0, 200)}"`),
+      ...recentCheckins.map(c => `check-in: "${String(c.raw_text || '').slice(0, 200)}"`),
+    ];
+    lines.push(`THE MOST RECENT THINGS THEY SAID IN THEIR OWN WORDS (newest first — where this conflicts with any structured data above, this wins): ${own.join(' || ')}`);
+  } else {
+    lines.push('Nothing captured in their own words yet (no quick notes, no check-ins).');
   }
 
   return lines.filter(Boolean).join('\n');
