@@ -21,7 +21,13 @@ export const WRITABLE = {
   deadlines: ['college_id', 'title', 'due_date', 'kind', 'completed_at', 'source_ref', 'lead_days'],
   essays: ['college_id', 'title', 'prompt', 'word_limit', 'status', 'content', 'essay_kind', 'source_ref', 'source_label'],
   essay_versions: ['essay_id', 'content', 'word_count', 'label', 'note'],
-  reflection_entries: ['prompt_id', 'prompt_text', 'content', 'entry_date'],
+  // The last seven columns are the student-intelligence facets added in 0026. Reflections live in
+  // one table, not two: prompt-driven journaling and a check-in's "how are you doing" answer are
+  // the same kind of record and are read together.
+  reflection_entries: [
+    'prompt_id', 'prompt_text', 'content', 'entry_date',
+    'motivation', 'confidence', 'stress', 'work_style', 'barriers', 'raw_text', 'source',
+  ],
   test_scores: ['test_type', 'test_date', 'composite', 'section_scores', 'is_target'],
   scholarships: ['name', 'amount', 'deadline', 'status', 'notes'],
   activities: ['activity_type', 'position', 'organization', 'description', 'impact', 'status', 'hours_per_week', 'weeks_per_year', 'grade_levels', 'sort_order', 'evidence_url', 'verification_status', 'verifier_name', 'verifier_email', 'verifier_relationship', 'skills_tags', 'leadership_role'],
@@ -77,7 +83,6 @@ export const WRITABLE = {
   // to choose and no reason to let it set the one value the table already defaults to and means.
   service_logs: ['entry_date', 'organization', 'cause_area', 'hours', 'role', 'description', 'impact_note', 'reflection', 'supporting_details'],
   competitions: ['title', 'level', 'category', 'result', 'placement', 'occurred_on', 'description', 'source'],
-  reflections_log: ['entry_date', 'motivation', 'confidence', 'stress', 'work_style', 'barriers', 'raw_text', 'source'],
   checkins: ['week_key', 'raw_text', 'changes', 'source'],
   recommendation_feedback: ['item_label', 'item_ref', 'status', 'note', 'source'],
   activity_role_history: ['activity_id', 'role', 'started_at', 'ended_at', 'outcome', 'source'],

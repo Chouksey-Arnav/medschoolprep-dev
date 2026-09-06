@@ -66,7 +66,6 @@ export const RESOURCES = [
   'interest_history',
   'service_logs',
   'competitions',
-  'reflections_log',
   'checkins',
   'recommendation_feedback',
   'activity_role_history',

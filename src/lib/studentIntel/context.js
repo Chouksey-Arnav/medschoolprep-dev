@@ -14,7 +14,7 @@
 // follow elsewhere in this codebase.
 //
 // ── Corrections take precedence ──────────────────────────────────────────────
-// `interest_history` and `reflections_log`/`checkins` are append-only-by-use
+// `interest_history` and `reflection_entries`/`checkins` are append-only-by-use
 // logs: a student's most recent statement about something is read as the
 // current truth, and older rows about the SAME thing are kept for history but
 // are never allowed to contradict it in the summary a prompt sees. See

@@ -412,7 +412,7 @@ export function buildCoachSystemPrompt({
   safetyBlock = '',
   // ── Student-intelligence digest (src/lib/studentIntel/context.js) ─────────
   // Raw rows from the new tables (school_context, constraints_profile, quick_notes,
-  // interest_history, service_logs, competitions, reflections_log, checkins,
+  // interest_history, service_logs, competitions, reflection_entries, checkins,
   // recommendation_feedback) — buildStudentIntelBlock() below turns them into a compact,
   // task-scoped block instead of dumping the whole history. Optional and additive: a caller
   // that doesn't pass it gets exactly the prompt this function produced before it existed.

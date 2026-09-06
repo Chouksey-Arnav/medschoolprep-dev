@@ -61,7 +61,7 @@ const RESOURCE_MAP = {
   interest_history: 'interestHistory',
   service_logs: 'serviceLogs',
   competitions: 'competitions',
-  reflections_log: 'reflectionsLog',
+  reflection_entries: 'reflectionsLog',
   checkins: 'checkins',
   recommendation_feedback: 'recommendationFeedback',
   activity_role_history: 'activityRoleHistory',

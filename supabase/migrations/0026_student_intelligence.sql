@@ -174,21 +174,29 @@ alter table competitions enable row level security;
 -- Entirely voluntary and never inferred: `raw_text` covers the general dictated-note case, and
 -- the four labeled columns exist so a check-in that DOES answer one of them (e.g. a stress rating)
 -- can be read as structured data without parsing prose. All optional.
-create table if not exists reflections_log (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references app_users(id) on delete cascade,
-  entry_date date not null default current_date,
-  motivation text,
-  confidence text,
-  stress text,
-  work_style text,
-  barriers text,
-  raw_text text,
-  source text not null default 'student_reflection' check (source in ('student_entered', 'student_reflection', 'ai_summary', 'external_verified')),
-  created_at timestamptz not null default now()
-);
-create index if not exists reflections_log_user_id_idx on reflections_log(user_id);
-alter table reflections_log enable row level security;
+--
+-- These EXTEND the existing reflection_entries table (0017) rather than adding a second
+-- reflections table. reflection_entries already holds prompt-driven journaling
+-- (prompt_id/prompt_text/content/entry_date); the columns below are further optional facets of
+-- the same record. Two reflection tables would mean two places to look for "what has this student
+-- told us about how they're doing", which is exactly the duplicate source of truth this schema
+-- avoids elsewhere.
+alter table reflection_entries add column if not exists motivation text;
+alter table reflection_entries add column if not exists confidence text;
+alter table reflection_entries add column if not exists stress text;
+alter table reflection_entries add column if not exists work_style text;
+alter table reflection_entries add column if not exists barriers text;
+alter table reflection_entries add column if not exists raw_text text;
+alter table reflection_entries add column if not exists source text not null default 'student_reflection';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'reflection_entries_source_check') then
+    alter table reflection_entries
+      add constraint reflection_entries_source_check
+      check (source in ('student_entered', 'student_reflection', 'ai_summary', 'external_verified'));
+  end if;
+end $$;
+create index if not exists reflection_entries_user_created_idx on reflection_entries(user_id, created_at desc);
 
 -- ── 8. Weekly check-ins ──────────────────────────────────────────────────────────────────────────
 -- One row per submitted check-in (a student can submit more than once in a week if something
