@@ -22,6 +22,7 @@ import LocalMatchConsent from './LocalMatchConsent';
 import ServiceLogPanel from './ServiceLogPanel';
 import QuickCapture from './QuickCapture';
 import WeeklyCheckin, { WeeklyCheckinHistory } from './WeeklyCheckin';
+import ProfileIntelPrompt from './ProfileIntelPrompt';
 import { trackTargetForOpportunity, resourceForOpportunity, catalogDedupeKey } from '../../lib/trackingCatalog';
 import { TierLegend, DeadlineBoard, HosaTracker } from './ProgramTiers';
 import ProgramExplorer from './ProgramExplorer';
@@ -276,6 +277,8 @@ export default function OpportunitiesPanel({
 
   return (
     <div style={CC({ gap: 20 })}>
+      <ProfileIntelPrompt accent={C.violet} isMobile={isMobile} />
+
       <WeeklyCheckin accent={C.blue} isMobile={isMobile} />
 
       <PanelHero tourTag="portfolio-deep-opportunities" icon={Trophy} color={C.gold} color2={C.orange} m={isMobile}
