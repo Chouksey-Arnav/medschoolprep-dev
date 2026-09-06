@@ -19,6 +19,7 @@ import googleAuth from './api/auth/google.js';
 import resetPassword from './api/auth/reset-password.js';
 import me from './api/auth/me.js';
 import logout from './api/auth/logout.js';
+import account from './api/auth/account.js';
 import dataResource from './api/data/[resource].js';
 import progressSync from './api/progress-sync.js';
 import masterPlan from './api/master-plan.js';
@@ -27,6 +28,7 @@ import groq from './api/groq.js';
 import sendEmail from './api/send-email.js';
 import rewardClaim from './api/reward-claim.js';
 import lessonFeedback from './api/lesson-feedback.js';
+import safetyEvent from './api/safety-event.js';
 import parentLinks from './api/parent/links.js';
 import parentAccept from './api/parent/accept.js';
 import parentSummary from './api/parent/summary.js';
@@ -71,6 +73,13 @@ app.all('/api/auth/google', googleAuth);
 app.all('/api/auth/reset-password', resetPassword);
 app.all('/api/auth/me', me);
 app.all('/api/auth/logout', logout);
+// Data export (GET) and account deletion (DELETE). This route was missing for the life of this
+// file: Vercel serves api/auth/account.js at this path because of where the file sits, and this
+// server routes by hand, so here the request fell through to the SPA catch-all and the Export
+// button got the app's HTML shell back with a 200. The Privacy Policy promises both of these and
+// GDPR Art. 17/20 require them. scripts/verifyApiBoot.mjs now probes every handler file over HTTP
+// so a handler that exists without a route cannot ship again.
+app.all('/api/auth/account', account);
 app.all('/api/send-email', sendEmail);
 app.all('/api/groq', groq);
 app.all('/api/progress-sync', progressSync);
@@ -78,6 +87,9 @@ app.all('/api/master-plan', masterPlan);
 app.all('/api/roadmap', roadmap);
 app.all('/api/reward-claim', rewardClaim);
 app.all('/api/lesson-feedback', lessonFeedback);
+// The safety review queue's write end. See api/safety-event.js — it records that a
+// detection happened (who, when, how severe) and never what was said.
+app.all('/api/safety-event', safetyEvent);
 app.all('/api/parent/links', parentLinks);
 app.all('/api/parent/accept', parentAccept);
 app.all('/api/parent/summary', parentSummary);
@@ -94,6 +106,27 @@ app.all('/api/data/:resource', (req, res) => {
   return dataResource(req, res);
 });
 
+// Liveness probe, and deliberately the cheapest route in the file.
+//
+// There was no health endpoint at all, which is a gap worth more than it looks: an orchestrator
+// that is asked to health-check a path answers "unhealthy" the same way whether the app is
+// broken or the path simply does not exist, and an unhealthy container is withdrawn from the
+// load balancer. Traefik with no healthy backend answers every request — the whole site, not
+// just the API — with a plain-text 503 "no available server", which is exactly what a student
+// sees when there is nothing wrong with the application at all.
+//
+// It touches nothing: no Supabase, no mailer, no Groq. That is the point. A probe that calls a
+// dependency reports someone else's outage as this container's, and flaps the instance out of
+// the pool over a slow query. This answers only the question a liveness probe actually asks —
+// is this process up and routing? — and anything richer belongs in a separate readiness route
+// that is allowed to fail without taking the site down.
+app.all('/api/health', (req, res) => res.status(200).json({ ok: true, uptime: Math.round(process.uptime()) }));
+
+// Anything under /api that got this far has no handler. Without this it reaches the SPA
+// catch-all below, which answers an API call with index.html and a 200 — so the caller fails on
+// `res.json()` and reports a JSON parse error instead of the missing route it actually hit.
+app.all('/api/*', (req, res) => res.status(404).json({ error: 'Unknown endpoint.' }));
+
 const distDir = path.join(__dirname, 'dist');
 
 // `redirect: false` matters. Left on (the default), a request for /login would
@@ -103,7 +136,26 @@ const distDir = path.join(__dirname, 'dist');
 // canonical tag and the URL serving it would disagree, and a crawler would spend
 // its budget on hops. The prerender lookup below serves those directories'
 // index.html directly instead, with no redirect and no trailing slash.
-app.use(express.static(distDir, { redirect: false }));
+app.use(express.static(distDir, {
+  redirect: false,
+  // Every file under /assets/ carries a content hash in its name, so its contents can never
+  // change: cache it for a year and never revalidate. This is a load-time win, and it is also
+  // half of the fix for the dead-page failure described in index.html's boot-recovery comment —
+  // a browser still holding an older build's HTML (its service worker answers navigations from a
+  // precached copy) can boot from that build's chunks out of the HTTP cache long after a deploy
+  // has replaced them on disk, instead of asking for a 404 and stopping.
+  //
+  // Everything else — index.html, the prerendered pages, sw.js, the manifest — must revalidate on
+  // every request. An HTML file cached for even a few minutes is a student on a build whose
+  // chunks may already be gone, which is the exact failure this is here to prevent.
+  setHeaders: (res, filePath) => {
+    if (/[\\/]assets[\\/]/.test(filePath) && !filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 
 // ── Prerendered pages ───────────────────────────────────────────────────────
 //
@@ -167,6 +219,9 @@ const FILE_REQUEST = /\.[a-zA-Z0-9]+$/;
 app.get('*', (req, res) => {
   if (FILE_REQUEST.test(req.path)) return res.status(404).type('text/plain').send('Not found');
   const prerendered = PRERENDERED.get(routeKey(req.path));
+  // Same rule as the static handler above, which does not see these: an HTML document names one
+  // build's hashed chunks and must never outlive it in a cache.
+  res.setHeader('Cache-Control', 'no-cache');
   return res.sendFile(prerendered || path.join(distDir, 'index.html'));
 });
 

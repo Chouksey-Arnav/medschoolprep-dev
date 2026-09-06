@@ -258,6 +258,12 @@ export default function ParentsLanding({ onSignUp, onLogin, onHome, onOpenLegal,
             </div>
           </a>
           <ThemeToggle mode={themeMode} onChange={onThemeChange} align="right" />
+          {/* The mirror of the "For parents" button on the student landing page — a parent
+              who arrived here first (or a student showing this page to a parent) gets a
+              way back to the student sign-up without hunting for the logo. */}
+          <a href="/" onClick={nav(onHome)} style={{ ...btnG({ fontSize: 12.5, padding: '8px 12px' }), textDecoration: 'none' }}>
+            For students
+          </a>
           <a href={AUTH_VIEWS.parentLogin} onClick={nav(onLogin)} style={{ ...btnG({ fontSize: 12.5, padding: '8px 12px' }), textDecoration: 'none' }}>
             <LogIn size={13} /> Parent sign-in
           </a>

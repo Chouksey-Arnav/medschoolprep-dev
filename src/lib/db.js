@@ -1914,6 +1914,46 @@ export async function absorbAuthoritativeCounters(counters) {
   });
 }
 
+/** Re-anchors the counters after a mid-session merge of another device's snapshot (the 409
+ *  conflict path in src/lib/progressSync.js — see absorbConflict there).
+ *
+ *  applyRemoteSnapshot has just replaced this device's four counters with the server's totals,
+ *  because mergeUserRecord treats the server as authoritative for them. That is right, and on
+ *  the boot path resetSyncBaseline immediately after it is all that is needed. Mid-session it
+ *  is not enough, because there is a third quantity in play: the increment this device had
+ *  already claimed for the push that was just refused.
+ *
+ *  Releasing that claim alone would lose it — the local total it was computed from has just been
+ *  overwritten by the server's — and re-anchoring the baseline alone would silently re-report
+ *  every other device's contribution as this device's own on the next push. So both are done
+ *  together, in one transaction:
+ *
+ *    baseline := server total          — what is genuinely already confirmed
+ *    local    := server total + delta  — every device's work, including this one's unsent gain
+ *
+ *  which leaves the next claimSyncDelta computing exactly `delta` again, reported exactly once.
+ *
+ *  `pending` is deliberately not cleared here: the caller resolves its own claim before calling,
+ *  and a pending flag still set at this point belongs to another tab's in-flight push, which
+ *  self-heals after PENDING_STALE_MS.
+ */
+export async function rebaseCountersAfterRemoteMerge(deltas) {
+  return db.transaction('rw', db.syncBaseline, db.user, async () => {
+    const u = await db.user.toCollection().first();
+    const row = await getBaselineRow();
+    const nextBaseline = { ...row };
+    const userPatch = {};
+    for (const f of COUNTER_FIELDS) {
+      const serverTotal = u?.[f] || 0;   // applyRemoteSnapshot just wrote the server's value here
+      nextBaseline[f] = serverTotal;
+      const d = (deltas && deltas[f]) || 0;
+      if (d) userPatch[f] = serverTotal + d;
+    }
+    if (u && Object.keys(userPatch).length) await db.user.update(u.id, userPatch);
+    await db.syncBaseline.put(nextBaseline);
+  });
+}
+
 /** Advances the CONFIRMED sync baseline for `field` by `amount` (may be negative, for a
  *  rollback) without going through the claim/commit pending flow. Used exclusively by
  *  rewardClaimQueue.js: XP granted via an idempotent reward claim (checkin/achievement/quest) is

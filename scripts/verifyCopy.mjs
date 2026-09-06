@@ -316,9 +316,17 @@ if (!process.argv.includes('--no-spell')) {
   // project it was pointed at, and a corpus file inside the repo is a file
   // somebody eventually commits.
   let unknown = [];
-  const args = ['cspell', 'lint', '--no-progress', '--no-summary', '--words-only', '--unique', '--config', path.join(ROOT, 'cspell.json'), 'stdin'];
+  // The installed binary by path, not `npx`: inside a container image build
+  // `npx cspell` treats a missing package as "fetch it from the registry", which
+  // turns a spell check into a network call in the middle of a deploy. Falling
+  // back to `npx` keeps the old behaviour for anyone running this outside a
+  // fully installed tree.
+  const local = path.join(ROOT, 'node_modules', '.bin', 'cspell');
+  const bin = fs.existsSync(local) ? local : 'npx';
+  const lint = ['lint', '--no-progress', '--no-summary', '--words-only', '--unique', '--config', path.join(ROOT, 'cspell.json'), 'stdin'];
+  const args = bin === 'npx' ? ['cspell', ...lint] : lint;
   try {
-    const out = execFileSync('npx', args, { cwd: ROOT, encoding: 'utf8', input: `${corpus.join('\n')}\n`, stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+    const out = execFileSync(bin, args, { cwd: ROOT, encoding: 'utf8', input: `${corpus.join('\n')}\n`, stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
     unknown = out.split('\n').map((w) => w.trim()).filter(Boolean);
   } catch (err) {
     // cspell exits non-zero when it finds something, which is the normal path.

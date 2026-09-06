@@ -49,6 +49,16 @@ const PORTFOLIO_RESOURCE_MAP = {
   // because a student who has told us they are 170 documented service hours short of a published
   // requirement should see that in their plan, not only in the calculator.
   admission_intake: 'admissionIntake',
+  // The Narrative Method Engine's inputs — the passion project's description, how many people it
+  // has actually reached, whether a mentor or partner has signed on, whether anything durable
+  // exists at a URL, and the brag-sheet answers (supabase/migrations/0025_narrative_engine.sql).
+  //
+  // The planner reads it because this is the only record in the whole Portfolio of the thing a
+  // student may be spending the most hours on. An activities row says a project exists; this says
+  // what state it is in, and every one of those fields is a scheduleable task when it is empty:
+  // "email one teacher to be the named mentor" is a fifteen-minute job that moves an activity out
+  // of Tier 3, and a plan that cannot see the gap cannot ever name it.
+  narrative_profile: 'narrativeProfile',
 };
 const PORTFOLIO_RESOURCES = Object.keys(PORTFOLIO_RESOURCE_MAP);
 

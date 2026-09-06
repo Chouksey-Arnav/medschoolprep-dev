@@ -28,18 +28,25 @@
 // makes it far worse. See PAGE_LIMIT_FREE below.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { ENFORCE_PREMIUM } from './ivy/constants.js';
+
 export const PLANS = {
   free: {
     id: 'free',
     label: 'Free',
     fullDossier: false,
     archiveMode: false,
+    narrativeEngine: false,
   },
   pro: {
     id: 'pro',
     label: 'Full access',
     fullDossier: true,
     archiveMode: true,
+    // The Narrative Method Engine (src/lib/ivy/) is the second feature designed
+    // to sit behind billing, and the first designed that way from the start.
+    // See canUseNarrativeEngine below and PREMIUM in src/lib/ivy/constants.js.
+    narrativeEngine: true,
   },
 };
 
@@ -81,6 +88,46 @@ export function canExportFullDossier(user) {
  */
 export function canExportArchive(user, audience = 'student') {
   return readPlan(user).archiveMode && audience === 'student';
+}
+
+/**
+ * Whether this account gets the full Narrative Method Engine reading.
+ *
+ * ── The gate is built and currently OPEN ───────────────────────────────────
+ * `ENFORCE_PREMIUM` in src/lib/ivy/constants.js is false, so this returns true
+ * for everyone today. It exists now rather than later for the reason this whole
+ * module exists: retro-fitting a paywall means finding every entry point, and
+ * the ones you miss are the ones that matter. There is exactly one entry point
+ * — `runEngine()` — and it takes its tier from here.
+ *
+ * ── What free gets when the gate closes ────────────────────────────────────
+ * Not a blur. The engine runs on their real profile and returns their real
+ * theme, their four rubric scores, their portfolio shape and the single
+ * highest-value action. Same principle as the dossier preview above: seeing a
+ * true finding about your own file is the argument; a locked screen is not.
+ *
+ * ── And what is never gated, on any plan ───────────────────────────────────
+ * Everything in src/lib/ivy/safeguards.js: the confidence interval, the honest
+ * expectations, the AI-detection reassurance, the demographic definitions.
+ * A student must not be able to buy their way into an honest answer, and a free
+ * account must not be shown a confident finding without the caveats that make
+ * it safe to act on. scripts/verifyIvyEngine.mjs asserts both halves.
+ */
+export function canUseNarrativeEngine(user) {
+  if (!NARRATIVE_ENGINE_ENFORCED) return true;
+  return readPlan(user).narrativeEngine;
+}
+
+/**
+ * Re-exported under this module's own name so that flipping the launch switch
+ * is a one-line change in src/lib/ivy/constants.js, and nothing outside that
+ * file has an opinion about when the paywall starts.
+ */
+export const NARRATIVE_ENGINE_ENFORCED = ENFORCE_PREMIUM;
+
+/** The tier string `runEngine()` expects. */
+export function narrativeEngineTier(user) {
+  return canUseNarrativeEngine(user) ? 'premium' : 'free';
 }
 
 /**

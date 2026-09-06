@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import {
   GraduationCap, ScrollText, Handshake, UserCheck, Mic, Calculator, Plus, ArrowRight, Stethoscope,
-  Activity,
+  Activity, Compass,
 } from 'lucide-react';
 import { C, R, CC, G } from '../../lib/theme';
 import PanelHero, { StatTile } from '../ui/PanelHero';
@@ -45,6 +45,11 @@ export const APPLYING_SECTIONS = [
   { id: 'recommenders', ic: UserCheck, label: 'Recommenders', color: C.fuchsia, blurb: 'Who is writing for you, and when you asked' },
   { id: 'interview', ic: Mic, label: 'Interviews', color: C.orange, blurb: 'MMI stations, CASPer, and a scored practice run' },
   { id: 'calc', ic: Calculator, label: 'Chances', color: C.gold, blurb: 'Your real odds at the programs on your list' },
+  // Last, and deliberately beside Chances: the two answer the same question at
+  // different altitudes. Chances says what your odds are at these programs;
+  // this says what your file currently READS as, and what would change that.
+  // It emits no probability of its own — see src/lib/ivy/engine.js.
+  { id: 'narrative', ic: Compass, label: 'Narrative reading', color: C.violet, blurb: 'What a reader would take from your file — theme, spike, and the rewrites that fix it' },
 ];
 export const DEFAULT_APPLYING_SECTION = 'colleges';
 
@@ -77,6 +82,10 @@ export default function ApplyingPanel({
     if (colleges && !recommenders) out.push({ tone: 'info', text: 'No recommenders logged. Teachers write these in the order they were asked, and the good ones fill up in the spring.', actionLabel: 'Add one', onAction: () => onSectionOpen?.('recommenders') });
     if (colleges && !interviews) out.push({ tone: 'info', text: 'You have not run a practice interview. One scored MMI station tells you more than reading about them for an hour.', actionLabel: 'Practice', onAction: () => onSectionOpen?.('interview') });
     if (colleges >= 2) out.push({ tone: 'good', text: 'Your chances are calculated against the real admitted profiles of the schools on your list — not a generic score.', actionLabel: 'See the odds', onAction: () => onSectionOpen?.('calc') });
+    // Offered whether or not there is a list, because the question it answers —
+    // does my file say one thing — is answerable from the essays and activities
+    // alone, and is most useful before the list is finished rather than after.
+    if (essays) out.push({ tone: 'info', text: 'Your drafts and your activities can be read the way an admissions officer reads them: one theme or several, a spike or a list, and the specific sentences that are doing the least work.', actionLabel: 'Run the reading', onAction: () => onSectionOpen?.('narrative') });
     // Always offered, and never gated on having a list, because this is the one
     // thing on the page whose deadlines a ninth-grader still has time to meet.
     out.push({ tone: 'info', text: 'Combined-degree and direct-admit programs — BS/MD, direct-admit nursing, six-year pharmacy — are applied to from high school, and most of them close in November of senior year. Their requirements start counting in ninth grade.', actionLabel: 'See the programs', onAction: () => onSectionOpen?.('combined') });
@@ -89,7 +98,7 @@ export default function ApplyingPanel({
     const st = {
       colleges: status(colleges, 4), essays: status(essays, 2),
       aid: null, recommenders: status(recommenders, 2), interview: status(interviews, 1),
-      calc: null, combined: null, medex: null,
+      calc: null, combined: null, medex: null, narrative: null,
     }[s.id];
     return {
       ...s,

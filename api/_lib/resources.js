@@ -47,6 +47,15 @@ export const RESOURCES = [
   // over a year, which is exactly the kind of thing a portability request is
   // for.
   'medex_scores',
+  // The Narrative Method Engine (supabase/migrations/0025_narrative_engine.sql).
+  // `narrative_profile` is one row per user holding the engine's inputs;
+  // `narrative_runs` is the append-only history of readings the student kept.
+  // Both listed here like every other resource so they are exportable and
+  // deletable with the account — and deliberately NOT gated on the premium
+  // plan the feature is headed for, because a student owns their own inputs and
+  // their own history on every plan, including one they have cancelled.
+  'narrative_profile',
+  'narrative_runs',
 ];
 
 /** Membership test for the CRUD endpoint's `[resource]` path segment. */

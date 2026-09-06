@@ -238,6 +238,12 @@ export default function SignupView({ initialEmail = '', initialRole = 'student',
                   <a href={AUTH_VIEWS.parentSignup} className="msp-auth-link" style={{ color: C.violetL, fontWeight: 600 }}>Create a parent account</a>
                 </div>
               )}
+              {lockedRole === 'parent' && (
+                <div style={{ textAlign: 'center', fontSize: 12.5, color: C.t3 }}>
+                  Are you the student?{' '}
+                  <a href={AUTH_VIEWS.signup} className="msp-auth-link" style={{ color: C.blueL, fontWeight: 600 }}>Create a student account</a>
+                </div>
+              )}
             </div>
           </motion.form>
         )}

@@ -393,8 +393,9 @@ Two supporting fixes found on the way:
 
 Every key, every failover hop and every retry used to live inside Groq, so one rate limit or one
 outage took all of them. `api/_lib/aiProviders.js` adds a **second, independent provider** behind
-the whole pool — Cerebras, OpenRouter, Together, Gemini, or any OpenAI-compatible endpoint,
-selected by whichever key the operator sets. It is never in the normal rotation and only ever sees
+the whole pool — any OpenAI-compatible endpoint, named by the operator through `FALLBACK_AI_BASE_URL`
+/ `FALLBACK_AI_MODEL` / `FALLBACK_AI_KEY` rather than picked from a list of vendors baked into this
+repo. It is never in the normal rotation and only ever sees
 a request Groq could not serve, so a free tier lasts and a paid one bills as a function of Groq's
 downtime rather than of our volume. With no key set, nothing changes.
 

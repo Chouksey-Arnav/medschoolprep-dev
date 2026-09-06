@@ -8,7 +8,10 @@ import { requireStudent } from '../_lib/session.js';
 import { RESOURCES, RESOURCE_SET } from '../_lib/resources.js';
 
 // Columns a client may write per resource (id, user_id, created_at are server-controlled).
-const WRITABLE = {
+// Exported for scripts/verifyApiBoot.mjs, which checks these three registries against
+// api/_lib/resources.js and the migrations. A second hand-maintained copy of any of them in the
+// checker would defeat the point of the checker.
+export const WRITABLE = {
   colleges: ['name', 'category', 'status', 'ea_ed_deadline', 'rd_deadline', 'notes', 'css_profile_required', 'financial_aid_deadline'],
   college_checklist_items: ['college_id', 'label', 'done', 'sort_order'],
   // `completed_at` is what makes the Milestones feed two-way (finishing a date is a different act
@@ -44,6 +47,15 @@ const WRITABLE = {
   // `week_key` and `score` are the only NOT NULL columns; the rest describe how the number was
   // reached so a sealed week stays readable after the benchmark or pillar weights change.
   medex_scores: ['week_key', 'score', 'band', 'benchmark_id', 'benchmark_name', 'pillars', 'coverage', 'confidence'],
+  // The Narrative Method Engine (supabase/migrations/0025_narrative_engine.sql). The profile is
+  // the student's own inputs — the form owns the whole object and saves it whole, so every
+  // column here is one the panel writes (see packProfile in src/lib/ivy/store.js).
+  narrative_profile: ['intended_major', 'value_theme', 'project', 'practice', 'study_log', 'brag_sheets', 'completed_items', 'additional_info'],
+  // A kept reading. Append-only below, for the same reason a MedEx seal is: the value of a
+  // history is that a September number stays the September number. `result` is the run minus
+  // essay drafts — stripDrafts() in src/lib/ivy/serialize.js is what enforces that, before the
+  // payload ever reaches this endpoint.
+  narrative_runs: ['ran_at', 'grade_level', 'tier', 'spike_index', 'coherence', 'portfolio_balance', 'project_viability', 'result'],
 };
 
 // Every readable resource must also declare what a client may write to it. This used to be an
@@ -52,27 +64,46 @@ const WRITABLE = {
 // TypeError on every POST. The endpoint caught it, logged it, and returned a generic 500 — and
 // src/lib/medex/store.js treats a failed seal as "another device sealed first" and re-reads. The
 // result was a table that had never received a single row since launch with nothing anywhere
-// reporting a problem. Failing loudly at module load is the cheap way to make that class of drift
-// impossible: a missing entry now breaks every request to this endpoint on the first deploy,
-// instead of silently breaking one table forever.
-for (const resource of RESOURCES) {
-  if (!Array.isArray(WRITABLE[resource])) {
-    throw new Error(`api/data/[resource]: '${resource}' is in RESOURCES but has no WRITABLE column list.`);
-  }
+// reporting a problem.
+//
+// The first fix for that threw at module load. It made the drift impossible to miss and it was
+// the wrong place to put the check: this module is imported at the top of server.js, so the throw
+// took the entire process down before it listened, the container never became healthy, and one
+// missing line in a table registry turned into a rolled-back deploy with the whole site — every
+// page, every other endpoint — riding on it. `narrative_profile` did exactly that. A registry
+// mistake is worth failing on; it is not worth failing on IN PRODUCTION, where the only thing
+// left to do about it is roll back.
+//
+// So the check moved to where it can still be fatal without an outage: scripts/verifyApiBoot.mjs
+// runs it in `npm run build` (so the image never builds) and in CI (so the pull request never
+// goes green). Here, at runtime, the same drift degrades the one resource it affects — reads and
+// deletes keep working, writes 503 with a message that names the cause — and says so on stderr on
+// every boot. Loud, contained, and still up.
+const MISCONFIGURED = RESOURCES.filter((resource) => !Array.isArray(WRITABLE[resource]));
+if (MISCONFIGURED.length) {
+  console.error(
+    `api/data/[resource]: no WRITABLE column list for ${MISCONFIGURED.join(', ')} — ` +
+    'writes to those resources will 503 until one is added. This should have been caught by ' +
+    '`npm run verify:api-boot` before deploy.',
+  );
 }
+const MISCONFIGURED_SET = new Set(MISCONFIGURED);
 
 // Resources whose rows get an `updated_at` bump on PATCH (only tables that actually have that
 // column — see the migration file for which ones do).
-const TOUCHES_UPDATED_AT = new Set([
+export const TOUCHES_UPDATED_AT = new Set([
   'colleges', 'essays', 'research_experience', 'skills_certifications', 'clinical_hours', 'recommenders',
-  'admission_intake', 'credential_suggestions', 'reflection_entries',
+  'admission_intake', 'credential_suggestions', 'reflection_entries', 'narrative_profile',
 ]);
 
 // Resources a client may create and delete but never edit. A MedEx seal is a record of what a
 // student's profile looked like in one particular week; the whole point of sealing is that the
 // number stops moving, so an endpoint that accepted a PATCH would quietly make the history
 // rewritable and every week-over-week delta in the app unreliable.
-const APPEND_ONLY = new Set(['medex_scores']);
+// `narrative_runs` is here for the same reason: a run is a reading of a profile on a day, and the
+// trend chart the feature is built around is only honest if last month's number cannot be edited
+// into this month's.
+export const APPEND_ONLY = new Set(['medex_scores', 'narrative_runs']);
 
 // entity_type -> table, for validating portfolio_evidence's polymorphic entity_id ownership.
 const EVIDENCE_ENTITY_TABLES = new Set(['activities', 'awards', 'research_experience', 'clinical_hours']);
@@ -145,6 +176,12 @@ export default async function handler(req, res) {
       body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     } catch {
       return res.status(400).json({ error: 'Invalid JSON body.' });
+    }
+
+    // POST and PATCH are the only methods that need a WRITABLE list; a resource missing one stays
+    // readable and deletable instead of taking the endpoint (and the process) with it.
+    if ((req.method === 'POST' || req.method === 'PATCH') && MISCONFIGURED_SET.has(resource)) {
+      return res.status(503).json({ error: 'This resource is not accepting writes right now.', reason: 'unconfigured' });
     }
 
     if (req.method === 'POST') {

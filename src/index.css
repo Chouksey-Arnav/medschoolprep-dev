@@ -271,6 +271,114 @@ body::before {
   .msp-search-hit { animation: none; }
 }
 
+/* ── The still loader ──────────────────────────────────────────────────────
+   What every loading state in the app currently renders. The six-beat brand
+   journey below it is switched off at JOURNEY_ANIMATION_ENABLED in
+   src/components/BrandJourney.jsx; this is what stands in its place, and the
+   two are kept side by side on purpose so flipping that one constant swaps
+   them back with no CSS to restore.
+
+   The design brief for this one is deliberately unambitious: the finished mark,
+   held completely still, inside a progress ring that sweeps. Nothing assembles,
+   nothing tells a story, nothing asks to be watched. The only thing moving is
+   the sweep, and it is moving for one reason — a loading screen with no motion
+   at all is indistinguishable from a crashed one, and that ambiguity costs more
+   than the motion does.
+
+   Everything here is transform and opacity, so it composites without touching
+   the main thread, which is busy parsing the bundle at precisely the moment
+   this is on screen. */
+
+.msp-still {
+  position: relative;
+  width: var(--msp-still-size, 220px);
+  height: var(--msp-still-size, 220px);
+  flex-shrink: 0;
+  isolation: isolate;
+}
+
+/* The same pool of deep space the journey carries, and for the same reason: the
+   climber in the mark is near-white and the trail's first dot is deep violet,
+   so on the light palettes both would disappear into the page. The loader
+   brings its own ground rather than forcing a dark card into a light UI. */
+.msp-still::before {
+  content: '';
+  position: absolute; inset: -12%;
+  border-radius: 50%;
+  background: radial-gradient(circle closest-side at 50% 52%,
+    rgba(5, 8, 18, .40) 0%, rgba(6, 10, 22, .32) 52%,
+    rgba(8, 12, 26, .14) 74%, rgba(8, 12, 26, 0) 100%);
+  z-index: -1;
+}
+/* Same correction the journey needs, for the same reason: on a pale page the
+   soft-edged haze above reads as a smudge rather than as a ground, so it becomes
+   a defined disc — a circle reads as a window. Sized to sit just inside the
+   progress ring so the ring stays the outer edge of the composition. */
+:root[data-theme-family="light"] .msp-still::before {
+  inset: -4%;
+  background: radial-gradient(circle closest-side at 50% 50%,
+    #080c18 0%, #080c18 76%, rgba(8, 12, 24, .72) 88%, rgba(8, 12, 24, 0) 100%);
+}
+
+.msp-still-mark {
+  position: absolute;
+  /* Inset so the mark sits inside the ring rather than tangent to it. The gap is
+     smaller than it looks in the numbers: mark.png carries transparent margin of
+     its own, so the artwork lands well clear of the stroke at this value. */
+  inset: 10%;
+  width: 80%; height: 80%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.msp-still-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  overflow: visible;
+}
+.msp-still-ring circle {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.msp-still-ring-track { stroke: rgba(148, 163, 184, .18); }
+
+/* Rotating the whole dashed circle is what produces the sweep. Rotation is a
+   transform, so this is one composited layer spinning — as cheap as it gets —
+   where animating stroke-dashoffset would repaint the path every frame. */
+@keyframes mspStillSweep { to { transform: rotate(360deg); } }
+.msp-still-ring-sweep {
+  transform-origin: 50% 50%;
+  animation: mspStillSweep 1.5s linear infinite;
+  will-change: transform;
+}
+
+/* The bar under the mark. Indeterminate rather than filling once: with no pass
+   to measure against, a bar that fills to 100% and resets is claiming to know
+   how much longer this will take, and it does not. */
+.msp-still-track {
+  position: relative;
+  width: calc(var(--msp-still-size, 220px) * 0.56);
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, .18);
+}
+@keyframes mspStillSlide {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(340%); }
+}
+.msp-still-fill {
+  display: block;
+  width: 30%;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #2d7fff 0%, #8b5cf6 55%, #22d3ee 100%);
+  animation: mspStillSlide 1.5s cubic-bezier(.65, 0, .35, 1) infinite;
+  will-change: transform;
+}
+
 /* ── The brand journey loader ──────────────────────────────────────────────
    MedSchoolPrep's loading animation, driven entirely from here. See
    src/components/BrandJourney.jsx for the markup and the call sites.
@@ -602,6 +710,11 @@ body::before {
   .msp-j-glow-warm { opacity: .5 !important; transform: none !important; }
   .msp-j-ring circle { animation: none !important; opacity: .8; stroke-dashoffset: 0; }
   .msp-j-fill { animation: mspJFill 2.4s linear infinite !important; }
+  /* Same bargain for the still loader: the sweep stops and closes into a plain
+     ring, and only the bar keeps moving — slower — so the screen still says
+     "working" without anything circling in the reader's periphery. */
+  .msp-still-ring-sweep { animation: none !important; stroke-dasharray: none !important; opacity: .8; }
+  .msp-still-fill { animation: mspStillSlide 3.4s ease-in-out infinite !important; }
 }
 
 /* Loading placeholders (see SkeletonCard in src/components/parent/ParentApp.jsx). A pulse rather
@@ -923,6 +1036,8 @@ body::before {
    right still frame — so only the progress hairline needs to keep moving to say
    the app is still working. */
 :root[data-reduce-motion] .msp-j-fill { animation: mspJFill 2.4s linear infinite !important; }
+:root[data-reduce-motion] .msp-still-ring-sweep { animation: none !important; stroke-dasharray: none !important; opacity: .8; }
+:root[data-reduce-motion] .msp-still-fill { animation: mspStillSlide 3.4s ease-in-out infinite !important; }
 
 /* The same collapse, driven by the media query rather than the attribute.
    `data-reduce-motion` is written by applyA11y() — which means it does not
@@ -951,6 +1066,8 @@ body::before {
   :root:not([data-motion-allowed]) .msp-shimmer { animation: mspShimmer 2.6s ease-in-out infinite !important; }
   :root:not([data-motion-allowed]) .rm-shimmer { animation: rm-shimmer 2.6s ease-in-out infinite !important; }
   :root:not([data-motion-allowed]) .msp-j-fill { animation: mspJFill 2.4s linear infinite !important; }
+  :root:not([data-motion-allowed]) .msp-still-ring-sweep { animation: none !important; stroke-dasharray: none !important; opacity: .8; }
+  :root:not([data-motion-allowed]) .msp-still-fill { animation: mspStillSlide 3.4s ease-in-out infinite !important; }
 }
 
 /* ── Reduced transparency ─────────────────────────────────────────────────

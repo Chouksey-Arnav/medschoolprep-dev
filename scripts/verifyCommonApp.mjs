@@ -58,6 +58,30 @@ eq('there are 3 community-based-organization slots', CA.CA_WRITING_LIMITS.maxCom
 eq('the activity category dropdown has 30 options', CA.CA_CATEGORIES.length, 30);
 eq('there are 7 personal essay prompts', CA.CA_ESSAY_PROMPTS.length, 7);
 
+// ── The other copy of these numbers ─────────────────────────────────────────
+// The Narrative Method Engine ships its own Common App auditor (src/lib/ivy/commonApp.js) with
+// its own LIMITS table in src/data/ivy/commonAppRules.js. That separation is deliberate and
+// correct — this layer MODELS and DERIVES the form, that one AUDITS a draft opinionatedly — but
+// it means the same real-world number is written down twice, in two files, by two features.
+//
+// Two copies of a fact eventually disagree, and when these two disagree the app tells a student
+// two different things about the same field of the same form. So they are pinned to each other
+// here: either both are right or the build fails. Neither module owns the other; this assertion
+// is the contract between them.
+const IVY = await import('../src/data/ivy/commonAppRules.js');
+for (const [ours, theirs, label] of [
+  [CA.CA_LIMITS.description, IVY.LIMITS.activityDescription, 'activity description'],
+  [CA.CA_LIMITS.position, IVY.LIMITS.activityPosition, 'activity position'],
+  [CA.CA_LIMITS.organization, IVY.LIMITS.activityOrganization, 'organization name'],
+  [CA.CA_LIMITS.maxActivities, IVY.LIMITS.activitySlots, 'activity slots'],
+  [CA.CA_LIMITS.maxHonors, IVY.LIMITS.honorSlots, 'honor slots'],
+  [CA.CA_WRITING_LIMITS.personalEssayMax, IVY.LIMITS.personalStatement, 'personal essay ceiling'],
+  [CA.CA_WRITING_LIMITS.personalEssayMin, IVY.LIMITS.personalStatementMin, 'personal essay floor'],
+  [CA.CA_WRITING_LIMITS.additionalInfoMax, IVY.LIMITS.additionalInfo, 'additional information'],
+]) {
+  eq(`the ${label} limit agrees with the narrative engine's copy`, ours, theirs);
+}
+
 assert('every section has a unique id',
   new Set(CA.CA_SECTION_IDS).size === CA.CA_SECTION_IDS.length);
 for (const s of CA.CA_SECTIONS) {
@@ -88,6 +112,21 @@ assert('the essay workspace feeds more than one Writing section',
   CA.sectionsFedBy('portfolio', 'applying', 'essays').length >= 2,
   'the personal essay, additional information and supplements are three different sections');
 eq('a surface that feeds nothing says so', CA.sectionsFedBy('sat', 'practice').length, 0);
+
+// A NAMED section that has no mapping must return nothing, never the union of its view's
+// mappings. The Applying page has nine sections and six mappings; when this fell back to the
+// view-level key, financial aid, interview prep, combined degrees, the MedEx Score and the
+// narrative reading each rendered a badge claiming they fed Testing, Writing, the College List
+// and Recommenders at once. Five panels making a false claim, and none of them wrong in a way a
+// reader would notice.
+for (const unmapped of ['aid', 'interview', 'combined', 'medex', 'narrative']) {
+  eq(`the "${unmapped}" section claims to feed nothing rather than everything`,
+    CA.sectionsFedBy('portfolio', 'applying', unmapped).length, 0);
+}
+// …while a caller with no section to give still gets the view's union, which is what the
+// fallback was written for.
+assert('a caller that names no section still gets the view mapping',
+  CA.sectionsFedBy('portfolio', 'applying').length > 1);
 assert('every declared source resolves back through the index',
   CA.CA_SECTIONS.filter((s) => s.source).every((s) =>
     CA.sectionsFedBy(s.source.tab, s.source.view, s.source.section).some((x) => x.id === s.id)));

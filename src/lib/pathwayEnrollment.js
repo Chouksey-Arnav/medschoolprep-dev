@@ -169,18 +169,54 @@ export function swapPathway(user, outKey, inKey, paths = {}) {
  * milestone nudges, the completion badge) has to ask the lesson which pathway it
  * came from instead of assuming the focused one.
  *
- * @returns {Map<string,string>} lesson id → pathway key
+ * ── The one exception, and why it is an omission rather than a value ────────
+ * The foundations tier (course strategy and certifications — see
+ * src/data/foundationUnits.js) is the same two units on all ten pathways,
+ * sharing one id space so that finishing a lesson once finishes it everywhere.
+ * Those lessons are deliberately LEFT OUT of this index rather than being given
+ * an arbitrary owner.
+ *
+ * Handing them one would have been the quiet bug: the first pathway in PATHS
+ * would have won, so a nursing student opening "Math sequencing" would see it
+ * labeled "Exploring Pre-Health" in the wrong accent, and — much worse — the
+ * unit verification written on completion would have been recorded against a
+ * pathway they are not enrolled in. Absent from the index, every caller falls
+ * through to the focused pathway, which is the correct answer for a lesson that
+ * genuinely belongs to all of them: it is credited to the track the student is
+ * actually working in, and fnd1 really is a unit of that track.
+ *
+ * @returns {Map<string,string>} lesson id → pathway key, for lessons owned by
+ *          exactly one pathway. Shared lessons are absent; ask the caller's
+ *          focused pathway instead.
  */
 export function buildLessonPathwayIndex(paths = {}) {
-  const index = new Map();
+  const seen = new Map();
+  const shared = new Set();
   for (const [key, p] of Object.entries(paths)) {
     for (const unit of p?.units || []) {
       for (const lesson of unit?.lessons || []) {
-        if (!index.has(lesson.id)) index.set(lesson.id, key);
+        if (seen.has(lesson.id) && seen.get(lesson.id) !== key) shared.add(lesson.id);
+        else seen.set(lesson.id, key);
       }
     }
   }
-  return index;
+  for (const id of shared) seen.delete(id);
+  return seen;
+}
+
+/** The lesson ids that appear on more than one pathway — the shared tier. Kept
+ *  beside the index so a caller can tell "not indexed" from "not a lesson". */
+export function sharedLessonIds(paths = {}) {
+  const owners = new Map();
+  for (const [key, p] of Object.entries(paths)) {
+    for (const unit of p?.units || []) {
+      for (const lesson of unit?.lessons || []) {
+        if (!owners.has(lesson.id)) owners.set(lesson.id, new Set());
+        owners.get(lesson.id).add(key);
+      }
+    }
+  }
+  return new Set([...owners.entries()].filter(([, keys]) => keys.size > 1).map(([id]) => id));
 }
 
 /** Every lesson in a pathway, flattened, in unit order. */

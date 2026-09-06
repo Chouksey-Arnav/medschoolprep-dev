@@ -23,6 +23,7 @@
 //                       emails have accounts.
 import { getSupabaseAdmin } from '../_lib/supabaseAdmin.js';
 import { issueOtp, overRequestLimit, ipOf } from '../_lib/otp.js';
+import { verifyRecaptcha } from '../_lib/recaptcha.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PURPOSES = ['signup', 'password_reset', 'signin'];
@@ -48,6 +49,11 @@ export default async function handler(req, res) {
   }
 
   const ip = ipOf(req);
+
+  const recaptchaOk = await verifyRecaptcha({ token: body?.recaptchaToken, ip, action: 'send_otp' });
+  if (!recaptchaOk) {
+    return res.status(400).json({ error: 'Could not verify you\'re not a robot. Please try again.', reason: 'recaptcha_failed' });
+  }
 
   try {
     const supabase = getSupabaseAdmin();

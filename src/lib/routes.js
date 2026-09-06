@@ -69,6 +69,9 @@ export const SUBVIEWS = {
       research: 'resume', skills: 'resume', clinical: 'resume', activities: 'resume', academics: 'resume',
       colleges: 'applying', essays: 'applying', aid: 'applying',
       recommenders: 'applying', interview: 'applying', calc: 'applying',
+      // The Narrative Method Engine. /portfolio/narrative is the link a counselor
+      // or a parent sends; it resolves to Applying with that section focused.
+      narrative: 'applying',
       // Not a retired tab — a section that needs its own shareable URL. See the
       // note beside 'combined' in PORTFOLIO_GROUP_FOR_VIEW in src/App.jsx:
       // /portfolio/combined is the link a counselor or a parent sends, and it

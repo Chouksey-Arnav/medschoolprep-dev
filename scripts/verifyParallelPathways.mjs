@@ -55,25 +55,50 @@ const verified = (l, e) => !!(e?.verified || (e && !l.quizIds?.length));
 // ── 1. Independence ──────────────────────────────────────────────────────────
 section('Three pathways are genuinely independent');
 
+// A lesson id may be owned by exactly one pathway, or it may be deliberately
+// shared by ALL of them — the foundations tier (course strategy, certifications;
+// see src/data/foundationUnits.js) is the same two units on every track, sharing
+// one id space so that reading a lesson once counts everywhere. What must never
+// exist is the middle case: an id on some pathways but not others. That is what
+// "progress bleeding between tracks" actually looks like — a Nursing lesson
+// silently marking a PA track complete — and it is what this checks for.
 const owner = new Map();
-const collisions = [];
+const owners = new Map();
 for (const [key, p] of Object.entries(PATHS)) {
   for (const unit of p.units || []) {
     for (const lesson of unit.lessons || []) {
-      if (owner.has(lesson.id)) collisions.push(`${lesson.id}: ${owner.get(lesson.id)} + ${key}`);
-      else owner.set(lesson.id, key);
+      if (!owner.has(lesson.id)) owner.set(lesson.id, key);
+      const set = owners.get(lesson.id) || new Set();
+      set.add(key);
+      owners.set(lesson.id, set);
     }
   }
 }
-assert('every lesson id belongs to exactly one pathway — parallel progress can never bleed between tracks',
-  collisions.length === 0, collisions.slice(0, 5).join('; '));
+const partial = [...owners.entries()]
+  .filter(([, keys]) => keys.size > 1 && keys.size < KEYS.length)
+  .map(([id, keys]) => `${id}: ${[...keys].join(' + ')}`);
+assert('no lesson id is shared by SOME pathways — parallel progress can never bleed between tracks',
+  partial.length === 0, partial.slice(0, 5).join('; '));
+
+const sharedIds = P.sharedLessonIds(PATHS);
+const soloIds = [...owners.keys()].filter((id) => !sharedIds.has(id));
+assert('the shared tier is shared by every pathway, not just several',
+  [...sharedIds].every((id) => owners.get(id).size === KEYS.length));
+
 assert('there are at least as many pathways as parallel slots', KEYS.length >= P.MAX_ACTIVE_PATHWAYS);
 eq('the parallel cap is three', P.MAX_ACTIVE_PATHWAYS, 3);
 
 const index = P.buildLessonPathwayIndex(PATHS);
-eq('the lesson→pathway index covers every lesson', index.size, owner.size);
-assert('the index agrees with the pathway definitions on every lesson',
-  [...owner.entries()].every(([id, key]) => index.get(id) === key));
+eq('the lesson→pathway index covers every singly-owned lesson', index.size, soloIds.length);
+assert('the index agrees with the pathway definitions on every singly-owned lesson',
+  soloIds.every((id) => index.get(id) === owner.get(id)));
+// Deliberately absent rather than arbitrarily owned: an id in the index would
+// have made the first pathway in PATHS the owner, labeling a shared lesson with
+// a track the student may not be enrolled in and writing that track's unit
+// verification on completion. Absent, every caller falls through to the focused
+// pathway, which is the right answer for a lesson that belongs to all of them.
+assert('shared lessons are absent from the index, so they credit the focused pathway',
+  [...sharedIds].every((id) => !index.has(id)), [...sharedIds].slice(0, 3).join(', '));
 
 // ── 2. Enrollment invariants ─────────────────────────────────────────────────
 section('The enrollment invariants hold, always');

@@ -22,6 +22,21 @@
 // is scheduled. Lower the budget as chunks move out; run with --update to
 // re-baseline after a deliberate change.
 //
+// ── Why there is more than one baseline ─────────────────────────────────────
+// The bundle is not the same size everywhere, and one number could not describe
+// both builds. src/lib/supabaseClient.js reads VITE_SUPABASE_URL and
+// VITE_SUPABASE_ANON_KEY and resolves to `null` when either is missing, so with
+// them unset Rollup folds the ternary and tree-shakes @supabase/supabase-js out
+// of the entry graph entirely — 56 KB gzipped that a configured build carries
+// and an unconfigured one does not.
+//
+// Production always has them set; CI and a plain local build never do. Holding
+// both to one number meant the number was right for whichever build recorded it
+// and wrong by 56 KB for the other, which is how a green CI run and a failing
+// deploy came from the same commit. So the baseline is keyed by whether Google
+// OAuth was configured at build time, and each build is measured against the
+// build it actually is.
+//
 // Run: node scripts/verifyPayload.mjs [--update]
 // ─────────────────────────────────────────────────────────────────────────────
 import fs from 'node:fs';
@@ -63,11 +78,29 @@ for (const [name, gz] of rows.slice(0, 5)) {
   console.log(`  · ${kb(gz).padStart(8)}  ${name}`);
 }
 
-const prev = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, 'utf8')) : null;
+// Which build this is. `npm run build` runs vite and this script in one shell,
+// so the env that decided the bundle is the env being read here.
+const oauthConfigured = Boolean(process.env.VITE_SUPABASE_URL && process.env.VITE_SUPABASE_ANON_KEY);
+const PROFILE = oauthConfigured ? 'oauth-configured' : 'oauth-unconfigured';
+
+function readBaselines() {
+  if (!fs.existsSync(BASELINE)) return {};
+  const raw = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+  // The original file was a single flat measurement, and it was recorded by a
+  // build with no Supabase env — that is the unconfigured profile.
+  if (raw.profiles) return raw.profiles;
+  return typeof raw.gzipBytes === 'number' ? { 'oauth-unconfigured': raw } : {};
+}
+
+const baselines = readBaselines();
+const prev = baselines[PROFILE] || null;
+
+console.log(`  profile     ${PROFILE}${oauthConfigured ? ' (Google OAuth built in)' : ' (Supabase env unset — SDK tree-shaken out)'}`);
 
 if (UPDATE || !prev) {
-  fs.writeFileSync(BASELINE, `${JSON.stringify({ gzipBytes: total, assets: rows.length }, null, 2)}\n`);
-  console.log(`\n✓ baseline set at ${kb(total)} gzipped.\n`);
+  baselines[PROFILE] = { gzipBytes: total, assets: rows.length };
+  fs.writeFileSync(BASELINE, `${JSON.stringify({ profiles: baselines }, null, 2)}\n`);
+  console.log(`\n✓ baseline for ${PROFILE} set at ${kb(total)} gzipped.\n`);
   process.exit(0);
 }
 
@@ -83,6 +116,8 @@ if (delta > SLACK) {
   console.error('  ever sees the app. If the growth is deliberate, load the new code with a');
   console.error('  dynamic import() so it leaves the entry graph, or re-baseline with');
   console.error('  `node scripts/verifyPayload.mjs --update` and say why in the commit.\n');
+  console.error(`  This is the ${PROFILE} baseline. --update rewrites only that one, so`);
+  console.error('  re-baseline in the same shape of build the number came from.\n');
   process.exit(1);
 }
 

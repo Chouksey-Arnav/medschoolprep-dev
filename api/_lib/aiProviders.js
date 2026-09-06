@@ -17,7 +17,7 @@
 // of them; an outage that covers the region covers all of them. The pool is deep
 // and it is one point of failure.
 //
-// So there are two layers now, and they are deliberately different companies:
+// So there are two layers, and they are deliberately different companies:
 //
 //   LAYER 1 — GROQ.    Primary for everything. Fastest, cheapest, and the one
 //                      the model tiers (Scout/Guide/Sage/Oracle) are named for.
@@ -29,37 +29,35 @@
 //                      a paid one is a function of Groq's downtime rather than
 //                      of our volume.
 //
-// ── Why this file is a registry rather than one hard-coded vendor ───────────
-// Every provider worth putting here speaks the OpenAI chat-completions shape, so
-// the difference between them is three strings (base URL, key, model id) and a
-// note about which optional parameters they will reject. Encoding that as data
-// means adding a provider is an env var, not a deploy — and, more importantly,
-// it means the operator picks the second vendor. Whoever runs this instance may
-// already have Cerebras credit, an OpenRouter account, or a Gemini key, and the
-// right second provider is the one they can actually get a key for today.
+// ── Why there are no named vendors in here any more ─────────────────────────
+// This file used to ship four hard-coded vendor presets — Cerebras, OpenRouter,
+// Together and Gemini — each carrying its own base URL, its own four-tier model
+// map, and its own note about which optional parameters it would reject. None of
+// them was ever configured on this deployment, and none is planned: MedSchoolPrep
+// runs on Groq keys only. What the presets actually cost was not compute, it was
+// truth — four model maps that nobody was in a position to notice going stale,
+// pinning names like `gemini-2.5-pro` and `llama-3.3-70b` that their vendors
+// deprecate on their own schedule. A dead code path that silently rots is worse
+// than no code path, because the day you finally need it is the day you discover
+// it stopped working eighteen months ago.
 //
-// Configure ANY of these and the relief layer turns itself on:
+// So the mechanism stays and the vendor list goes. Configuring a second provider
+// is now three environment variables rather than one:
 //
-//   CEREBRAS_API_KEY     — Cerebras Cloud. The closest match to Groq: same
-//                          open-weight models (gpt-oss-120b, Llama 3.3 70B) at
-//                          comparable speed, so a relief answer is not a worse
-//                          answer, just a slower path to the same one.
-//   OPENROUTER_API_KEY   — OpenRouter. The broadest catalog and the best
-//                          single choice when you do not want to think about it:
-//                          one key reaches every model named below.
-//   TOGETHER_API_KEY     — Together AI. Same open-weight family again.
-//   GEMINI_API_KEY       — Google Gemini through its OpenAI-compatible endpoint.
-//                          The most different of the four, which is exactly what
-//                          you want in a backup: a Gemini outage and a Groq
-//                          outage have no common cause.
 //   FALLBACK_AI_KEY + FALLBACK_AI_BASE_URL + FALLBACK_AI_MODEL
-//                        — anything else OpenAI-compatible, including a private
-//                          or self-hosted endpoint.
+//                        — anything OpenAI-compatible, including a private or
+//                          self-hosted endpoint. Set all three and the relief
+//                          layer turns itself on; set none and it stays off.
 //
-// With none of them set, nothing changes: `reliefProviders()` returns an empty
-// array and every call path behaves exactly as it did before this file existed.
-// The relief layer is an UPGRADE, never a dependency — the same contract
-// api/roadmap.js holds itself to for durable storage.
+// That is strictly more capable than the preset list was — every vendor the
+// presets named speaks the same OpenAI chat-completions shape, so each was only
+// ever three strings — and it puts the model id in the hands of whoever is
+// actually holding the account, where it can be corrected without a deploy.
+//
+// With nothing configured, `reliefProviders()` returns an empty array and every
+// call path behaves exactly as it did before this file existed. The relief layer
+// is an UPGRADE, never a dependency — the same contract api/roadmap.js holds
+// itself to for durable storage.
 //
 // ── What a relief provider is NOT allowed to change ────────────────────────
 // The date rule. A roadmap built on the relief provider is subject to the same
@@ -70,79 +68,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The tiers the app names its models by, mapped per provider.
+ * The one configurable relief endpoint.
  *
- * `oracle` is the one that matters here: the deep, large-output reasoning model
- * the roadmap and the master plan are built on. The others exist so a relief
- * hop from a chat turn lands on something proportionate rather than spending a
- * 120B call on a two-sentence answer.
+ * Returns null unless all three of the required vars are set, so a half-filled
+ * configuration switches the layer off rather than producing a provider that
+ * 401s on first use during someone else's outage.
+ *
+ * The four tiers the app names its models by are all served by FALLBACK_AI_MODEL
+ * unless overridden individually. `oracle` is the one that matters most: the
+ * deep, large-output reasoning model the roadmap and the master plan are built
+ * on. The others exist so a relief hop from a chat turn can land on something
+ * proportionate rather than spending a 120B call on a two-sentence answer.
  */
-const PRESETS = [
-  {
-    id: 'cerebras',
-    label: 'Cerebras',
-    env: 'CEREBRAS_API_KEY',
-    baseUrl: 'https://api.cerebras.ai/v1',
-    models: {
-      oracle: 'gpt-oss-120b',
-      sage: 'llama-3.3-70b',
-      guide: 'gpt-oss-120b',
-      scout: 'llama3.1-8b',
-    },
-    // Cerebras accepts response_format json_object; it does not take Groq's
-    // reasoning_effort on every model, and an unknown parameter is a 400 rather
-    // than an ignored field — so it is dropped rather than forwarded.
-    supports: { jsonMode: true, reasoningEffort: false },
-  },
-  {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    env: 'OPENROUTER_API_KEY',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    models: {
-      oracle: 'openai/gpt-oss-120b',
-      sage: 'meta-llama/llama-3.3-70b-instruct',
-      guide: 'openai/gpt-oss-20b',
-      scout: 'meta-llama/llama-3.1-8b-instruct',
-    },
-    supports: { jsonMode: true, reasoningEffort: true },
-    // OpenRouter asks callers to identify themselves; it is optional, and being
-    // a good citizen on a service we only touch during someone else's outage
-    // costs one header.
-    headers: {
-      'HTTP-Referer': 'https://medschoolprep.cloud',
-      'X-Title': 'MedSchoolPrep',
-    },
-  },
-  {
-    id: 'together',
-    label: 'Together',
-    env: 'TOGETHER_API_KEY',
-    baseUrl: 'https://api.together.xyz/v1',
-    models: {
-      oracle: 'openai/gpt-oss-120b',
-      sage: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
-      guide: 'openai/gpt-oss-20b',
-      scout: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
-    },
-    supports: { jsonMode: true, reasoningEffort: false },
-  },
-  {
-    id: 'gemini',
-    label: 'Gemini',
-    env: 'GEMINI_API_KEY',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    models: {
-      oracle: 'gemini-2.5-pro',
-      sage: 'gemini-2.5-pro',
-      guide: 'gemini-2.5-flash',
-      scout: 'gemini-2.5-flash-lite',
-    },
-    supports: { jsonMode: true, reasoningEffort: false },
-  },
-];
-
-/** A fully custom endpoint, for operators whose second provider is none of the above. */
 function customProvider() {
   const key = process.env.FALLBACK_AI_KEY;
   const baseUrl = process.env.FALLBACK_AI_BASE_URL;
@@ -169,23 +106,17 @@ function customProvider() {
 /**
  * Every configured relief provider, in the order they will be tried.
  *
- * Order is preset order, then the custom endpoint last — a named preset means
- * the operator picked a vendor deliberately, while FALLBACK_AI_* is the generic
- * escape hatch and makes a sensible last resort.
+ * One entry at most today. It stays an array because callWithRelief walks it and
+ * because the shape is what lets a second entry be added later without touching
+ * a caller.
  *
  * Recomputed per call rather than frozen at module load, because a serverless
  * instance can outlive an environment change and a cached empty list would keep
  * the relief layer switched off long after a key was added.
  */
 export function reliefProviders() {
-  const out = [];
-  for (const preset of PRESETS) {
-    const apiKey = process.env[preset.env];
-    if (apiKey) out.push({ ...preset, apiKey });
-  }
   const custom = customProvider();
-  if (custom) out.push(custom);
-  return out;
+  return custom ? [custom] : [];
 }
 
 /** True when anything at all is configured behind Groq. Cheap enough to call anywhere. */

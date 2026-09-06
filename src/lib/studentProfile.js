@@ -22,6 +22,12 @@ import {
   SCIENCE_OPTIONS, EXPERIENCE_OPTIONS,
 } from '../components/onboarding/Onboarding';
 import { buildPersonalBriefBlock } from './personalBrief';
+// The scope boundary rides on EVERY Medabrain surface, not only the ones that
+// look medical. A student asks about their own body wherever they happen to be
+// standing — mid-lesson on the nephron, mid-essay about their grandmother's
+// diagnosis, mid-SAT-drill at eleven at night — and a boundary that only exists
+// on the surfaces we predicted is not a boundary. See src/lib/safety/prompts.js.
+import { MEDICAL_SCOPE_BOUNDARY } from './safety/prompts';
 import { parseScholarshipNotes } from './scholarshipNotes';
 import { analyzeAcademics, gpaBand, gpaPercentileContext } from './academicIntel';
 
@@ -382,6 +388,24 @@ export function buildCoachSystemPrompt({
   // describeParallelPathways() — is what stops the coach from confidently talking about "your
   // pathway" in the singular to somebody who is deliberately comparing three of them.
   parallelPathwaysSummary = null,
+  // ── The deep context block (src/lib/coachContext.js) ──────────────────────
+  // Quiz performance BY TOPIC with its direction of travel, hours split by what
+  // they were spent on, the programs they saved, their weekly goal with its
+  // real numbers, and the actual deadline list. Pre-rendered as prose by the
+  // caller for the same reason timelineSummary is: a model handed rows invents
+  // a trend, a model handed "72% then 65%, falling" reports one.
+  deepContext = null,
+  // ── The mode (src/lib/medabrainModes.js) ──────────────────────────────────
+  // Appended LAST of the behavioral blocks, right before the tail, because the
+  // student picked it thirty seconds ago and it is the most decision-relevant
+  // instruction in the prompt for this particular turn.
+  modeBlock = '',
+  // ── The safety block (src/lib/safety/prompts.js) ──────────────────────────
+  // Empty on almost every turn. When it is not empty it outranks everything
+  // above it, which is why it is appended after the mode and after the stance:
+  // models weight late instructions more heavily, and "suspend the demanding-
+  // mentor stance" has to actually beat the demanding-mentor stance.
+  safetyBlock = '',
 } = {}) {
   const base = `You are Medabrain, the AI coach inside MedSchoolPrep, a prep platform built specifically for high school students in grades 9-12 who are interested in medicine or a health career — every student you talk to is roughly 14-18 years old, preparing for undergraduate admissions with an eye toward a future health-science major, not currently in or applying to medical/graduate school. Never bring up the MCAT, clinical rotations, or clinical-style interview formats (MMI, CASPer) unless the student explicitly asks about their long-term future — and even then, frame it as years-away context, not something to act on now.
 
@@ -497,7 +521,12 @@ You're talking with ${user?.name || 'a student'}${gradeLabel ? `, a ${gradeLabel
     ? `\n\n── How they rate their own lessons ──\n${feedbackSummary} Pitch your explanations accordingly. This is what they reported, not a measure of their ability — never hand it back to them as a judgment.`
     : '';
 
-  return base + buildPersonalBriefBlock(user) + onboardingNote + liveNote + recentActivityNote + timelineNote + roadmapNote + planNote + paceNote + levelNote + portfolioBrainNote + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + tail;
+  return base + buildPersonalBriefBlock(user) + onboardingNote + liveNote + recentActivityNote
+    + (deepContext || '')
+    + timelineNote + roadmapNote + planNote + paceNote + levelNote + portfolioBrainNote
+    + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + tail
+    + (modeBlock ? `\n${modeBlock}` : '')
+    + (safetyBlock || '');
 }
 
 // ── Meta Brain — Portfolio Intelligence system prompt ─────────────────────────
@@ -530,6 +559,10 @@ export function buildPortfolioSystemPrompt({
   // against real dates that are already gated on this student's class year.
   timelineSummary = null,
   roadmapSummary = null,
+  // See buildCoachSystemPrompt's `safetyBlock` — same block, same reason, and it
+  // must reach every conversational surface: a student discloses wherever they
+  // happen to be, not on the surface we expected.
+  safetyBlock = '',
 } = {}) {
   const base = `You are Medabrain, the Portfolio Intelligence specialist inside MedSchoolPrep — the same coaching mind as the app's head Medabrain coach, specialized on ${user?.name || 'this student'}'s undergraduate application: their college list, essays, deadlines, financial aid/scholarships, activities & resume, research, skills/certifications, clinical hours, recommenders, test scores, awards, and GPA. You go deeper here than the head coach can because you're handed the student's full tracked data below, not just summary counts.
 
@@ -692,7 +725,7 @@ Questions that stray outside the application (a study-plan question, a science q
 
 You are the one reader who will tell them the truth about this application before an admissions officer does. A thin activities list is thin; a college list with six reaches and no safety is a bad list; an essay draft that says nothing is a draft that says nothing. Say it, say why it costs them, and say what to do about it — do not soften a real gap into "you're off to a good start."${PERSONA_GUARDRAIL}${MEDABRAIN_ACTION_PROTOCOL}`;
 
-  return base + buildPersonalBriefBlock(user) + dataBlock + timelineBlock + roadmapBlock + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + rules;
+  return base + buildPersonalBriefBlock(user) + dataBlock + timelineBlock + roadmapBlock + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
 }
 
 // ── Medabrain — Prep (pathway/lesson) system prompt ──────────────────────────
@@ -750,6 +783,7 @@ export function buildPrepSystemPrompt({
   // the same reason: "what should I study next" has a different answer for somebody running
   // three tracks in parallel than for somebody running one.
   parallelPathwaysSummary = null,
+  safetyBlock = '',   // see buildCoachSystemPrompt
 } = {}) {
   const base = `You are Medabrain, the Prep specialist inside MedSchoolPrep — the same coaching mind as the app's head Medabrain coach, sitting right next to ${user?.name || 'this student'} while they study so they can get help without leaving the lesson.
 
@@ -797,7 +831,7 @@ You are a real tutor with real subject knowledge — biology, chemistry, physics
     ? `\n\nRules: start from the lesson content above — explain it a different way, quiz them on it, clarify the part they're stuck on. When the lesson doesn't cover what they asked, TEACH IT ANYWAY from your own knowledge and say you're going beyond this lesson; do not tell them to go ask somewhere else. What you must not do is misattribute: never claim the lesson says something it doesn't, and never invent a takeaway or a note of theirs. When they explain something back to you or answer a question you asked, judge it honestly: if the understanding is wrong or half-right, say exactly which part is wrong before anything else — a student who is told "close enough!" learns the wrong thing and finds out on a test. Keep replies short and conversational — 2-4 sentences unless they explicitly ask to be quizzed or want a structured breakdown. Format with markdown: **bold** key terms, bullet lists only when genuinely helpful.${PERSONA_GUARDRAIL}`
     : `\n\nRules: help them figure out what to study next, using the real unit/progress data above — never invent a unit, lesson, or completion count that isn't listed. When asked "what should I do next" or "what's my progress," reference specific unfinished units, the weakest category, or due flashcards by name instead of generic advice. Anything they ask that isn't about their progress — a science question, a concept they half-remember, how something works — just answer it properly; you're a tutor. Keep replies short and concrete — 2-4 sentences, unless they explicitly ask for a full breakdown of their progress (then a short bullet list per unit is appropriate) or a study schedule (then a markdown table — day/unit/task columns — beats a wall of prose). Format with markdown sparingly.${PERSONA_GUARDRAIL}`;
 
-  return base + buildPersonalBriefBlock(user) + scopeBlock + highlightBlock + memoryBlock + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + rules;
+  return base + buildPersonalBriefBlock(user) + scopeBlock + highlightBlock + memoryBlock + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
 }
 
 // ── Medabrain — SAT system prompt ─────────────────────────────────────────────
@@ -850,6 +884,7 @@ export function buildSatSystemPrompt({
   studentChoice = null,       // 'A' | 'B' | 'C' | 'D' | typed grid-in string
   wasCorrect = null,
   recentActivitySummary = null,
+  safetyBlock = '',   // see buildCoachSystemPrompt
 } = {}) {
   const name = user?.name || 'this student';
   const base = `You are Medabrain, the SAT specialist inside MedSchoolPrep — a focused branch of Medabrain (the app's head AI coach) that only helps ${name} with the Digital SAT: the question in front of them, what to practice next, pacing, and how to actually move their score. You report up through the same coaching system Medabrain does, so the two must never contradict each other.
@@ -933,5 +968,5 @@ STATUS: ${answered
 
 Be straight about where they actually stand: if the gap between their measured range and their target is large, say how large and what it would realistically take, rather than telling them they are almost there. A student who is told they're fine at 40% mastery finds out on test day.${PERSONA_GUARDRAIL}`;
 
-  return base + buildPersonalBriefBlock(user) + dataBlock + questionBlock + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + rules;
+  return base + buildPersonalBriefBlock(user) + dataBlock + questionBlock + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
 }

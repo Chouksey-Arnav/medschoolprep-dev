@@ -26,7 +26,18 @@ const CYAN = '34,211,238';
 function Crest({ idPrefix, animate = true }) {
   return (
     <img
-      src="/logo.png"
+      // Not /logo.png. That file is the 1254×1254 master (1.19 MB) and this
+      // component draws it at 34 px in the sidebar, ~64 px on the auth screens
+      // and ~96 px at its largest — so every visitor was downloading a megabyte
+      // to paint something smaller than a favicon, on the landing page, the
+      // loading screen, the auth panel and the nav bar alike.
+      //
+      // icon-512.png is that exact master rendered to 512 px by
+      // scripts/renderIcons.mjs (see its `master` constant): identical artwork,
+      // identical opaque backdrop, 145 kB, and still 5× more resolution than the
+      // largest size this component is ever asked for. Regenerating icons from a
+      // new logo.png keeps the two in step automatically.
+      src="/icon-512.png"
       alt="MedSchoolPrep logo"
       style={{
         display: 'block',

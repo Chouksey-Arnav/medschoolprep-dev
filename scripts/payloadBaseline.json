@@ -1,4 +1,12 @@
 {
-  "gzipBytes": 3151872,
-  "assets": 10
+  "profiles": {
+    "oauth-unconfigured": {
+      "gzipBytes": 3141095,
+      "assets": 10
+    },
+    "oauth-configured": {
+      "gzipBytes": 3153193,
+      "assets": 10
+    }
+  }
 }

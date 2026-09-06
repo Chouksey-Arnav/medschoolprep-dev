@@ -2,6 +2,159 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      ── Boot recovery ────────────────────────────────────────────────────────
+
+      Deliberately inline, deliberately first, and deliberately the only script
+      in this file that is either. Everything else that could catch a failure —
+      RootErrorBoundary, GlobalCrashGuard — lives inside the bundle, so none of
+      it exists in the one failure this handles: the bundle never arriving.
+
+      How that happens, in the case it actually happened in. The service worker
+      precaches index.html and answers every navigation from it
+      (`navigateFallback` in vite.config.js), and registerType:'prompt' means a
+      newly installed worker WAITS rather than taking over — on purpose, so a
+      deploy never reloads a tab out from under a student mid-question. The cost
+      is that a browser can keep serving one build's HTML for as long as a tab
+      stays open. That HTML names that build's hashed chunks, and chunks have a
+      shelf life: `app-assets` evicts at 200 entries, and Safari clears site data
+      after seven days without a visit. Once the chunk is gone from the cache AND
+      a later deploy has replaced it on the server, the page loads, asks for a
+      script that 404s, and stops — leaving #seo-shell on screen with nothing to
+      replace it. It reads as "the site turned into a plain text page", it
+      survives an ordinary reload, and the only way out is clearing website data,
+      which nobody should have to know.
+
+      So: if the shell is still on screen after the bundle has had its chance,
+      throw away the caches and workers that produced it and load once more from
+      the network. Guarded in sessionStorage, so a genuinely broken deploy
+      degrades to the static page with an honest message rather than a reload
+      loop — one recovery per tab, ever.
+
+      WHY IT IS UP HERE, above the font stylesheet, rather than at the end of
+      <body> where it started. A parser-inserted script does not run while a
+      stylesheet is still pending, and the fonts below come from a third party.
+      Measured in a browser: with fonts.googleapis.com unreachable, the identical
+      script at the end of <body> did not execute for twelve seconds — so on
+      exactly the degraded network where a boot is most likely to fail, the
+      thing that fixes it was last in the queue. In <head>, ahead of every
+      <link>, it runs the moment the parser reaches it. Being that early means it
+      cannot look at #seo-shell yet, which is why every check below waits for
+      DOMContentLoaded rather than reading the DOM straight away.
+    -->
+    <script>
+      (function () {
+        var GUARD = 'msp:boot-recovery';
+        var DEADLINE_MS = 15000; // generous: a cold 3G load of the entry chunk
+        var done = false;
+        var failedAsset = null;
+
+        // What this script did, for scripts/verifyBootRecovery.mjs to read. Cheap
+        // enough to always be on, and the alternative is a check that has to infer
+        // the watchdog's behavior from side effects and cannot tell "never fired"
+        // apart from "fired and did nothing".
+        var trace = window.__mspBoot = { started: Date.now(), recovered: 0, booted: 0, announced: 0, reason: null };
+
+        // Nothing below may read the DOM before it exists: this script runs while
+        // <body> is still an empty promise, so an early getElementById would say
+        // "no shell" and mean "not parsed yet".
+        function ready(fn) {
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+          else fn();
+        }
+
+        function booted() {
+          return document.readyState !== 'loading' && !document.getElementById('seo-shell');
+        }
+
+        function announce() {
+          var shell = document.getElementById('seo-shell');
+          if (!shell || document.getElementById('msp-boot-msg')) return;
+          var box = document.createElement('p');
+          box.id = 'msp-boot-msg';
+          box.setAttribute('role', 'status');
+          box.style.cssText = 'margin:1.5rem 0;padding:0.9rem 1rem;border:1px solid #30363d;'
+            + 'border-radius:8px;background:#0b0f16;color:#e7ecf2;font-weight:600;';
+          box.innerHTML = 'The app did not finish loading, so this is the plain-text version of '
+            + 'the page. Everything here works as a link. '
+            + '<a href="" style="color:#72b5f8">Try again</a>';
+          box.querySelector('a').addEventListener('click', function (e) {
+            e.preventDefault();
+            location.reload();
+          });
+          shell.insertBefore(box, shell.firstChild);
+          trace.announced = Date.now();
+        }
+
+        // Clearing the caches is the whole point: the stale HTML and the record of
+        // the chunk that is gone both live in them. Nothing here touches
+        // localStorage, IndexedDB or a session cookie, so a signed-in student
+        // stays signed in and unsynced work is untouched.
+        function recover(reason) {
+          if (done || booted()) return;
+          done = true;
+          trace.reason = reason;
+          trace.recovered = Date.now();
+
+          var already;
+          try { already = sessionStorage.getItem(GUARD); } catch (e) { already = '1'; }
+          if (already) { announce(); return; }
+          try { sessionStorage.setItem(GUARD, String(Date.now())); } catch (e) { /* private mode */ }
+
+          var jobs = [];
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+              return Promise.all(rs.map(function (r) { return r.unregister(); }));
+            }).catch(function () {}));
+          }
+          if (window.caches && caches.keys) {
+            jobs.push(caches.keys().then(function (keys) {
+              return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+            }).catch(function () {}));
+          }
+          // Reload however the cleanup went — a hung promise must not be the thing
+          // that leaves someone on a dead page.
+          var go = function () { location.reload(); };
+          Promise.all(jobs).then(go, go);
+          setTimeout(go, 4000);
+        }
+
+        /** Only ever decides once the DOM is there to decide about. */
+        function consider(reason) {
+          ready(function () { if (!booted()) recover(reason); });
+        }
+
+        // A failed script or stylesheet is proof, not a guess — act on it rather
+        // than waiting out the deadline. Registered before anything can load, so
+        // nothing is missed.
+        window.addEventListener('error', function (e) {
+          var el = e && e.target;
+          if (!el || el === window) return;
+          var url = el.src || el.href;
+          if (!url) return;
+          if (url.indexOf('/assets/') === -1 && url.indexOf('/src/main.jsx') === -1) return;
+          failedAsset = url;
+          consider('asset-error');
+        }, true);
+
+        // The backstop, for everything that fails without an error event: a chunk
+        // that resolves to an HTML error page, a module that throws on execute.
+        var timer = setTimeout(function () { consider('deadline'); }, DEADLINE_MS);
+
+        // A successful boot clears the guard, so a tab that recovers today can
+        // still recover after the next deploy.
+        ready(function () {
+          var poll = setInterval(function () {
+            if (!booted()) return;
+            clearInterval(poll);
+            clearTimeout(timer);
+            done = true;
+            trace.booted = Date.now();
+            try { sessionStorage.removeItem(GUARD); } catch (e) { /* private mode */ }
+          }, 250);
+        });
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
     <!--
       Kept under 155 characters on purpose: past that, search engines truncate
@@ -19,18 +172,34 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <!--
+      No SVG favicon here on purpose. public/icon.svg is 1.58 MB — it is the mark
+      exported with its full glow artwork rather than as flat vector shapes — and
+      a browser that prefers `image/svg+xml` fetches the whole thing to paint a
+      16-pixel tab icon. That was, by a wide margin, the single largest file the
+      average first visit downloaded: more than the entire CSS bundle and every
+      font put together, for a favicon.
+
+      The PNGs below are already generated from the same master (public/logo.png,
+      via scripts/renderIcons.mjs) and total under 8 kB for the pair. The file
+      itself stays in public/ — it is a legitimate export anyone may deep-link —
+      it just is not something every visitor is made to download.
+    -->
     <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/icon-16.png" />
 
     <!--
-      The first two frames of the loading animation (src/components/BrandJourney.jsx).
-      Everything else it draws is needed a second or more in, by which time the
-      images have streamed in on their own; these two are on screen immediately,
-      and without the hint a cold first visit opens on an empty circle.
+      The one image the loading screen draws (src/components/BrandJourney.jsx's
+      StillMark). Without the hint a cold first visit opens on an empty ring.
+
+      This used to preload /brand/book-left.png and /brand/book-right.png — the
+      first two frames of the six-beat animation. That animation is switched off
+      at JOURNEY_ANIMATION_ENABLED, so those two are no longer on screen at boot
+      and preloading them was fetching 56 kB nothing was going to draw. If the
+      animation is switched back on, swap these back too: it needs those two
+      immediately and mark.png not at all.
     -->
-    <link rel="preload" as="image" href="/brand/book-left.png" />
-    <link rel="preload" as="image" href="/brand/book-right.png" />
+    <link rel="preload" as="image" href="/brand/mark.png" />
     <title>MedSchoolPrep — Your Path Into Medicine</title>
 
     <!--

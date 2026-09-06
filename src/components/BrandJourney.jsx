@@ -31,6 +31,29 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 //   <BrandShowcase/>       the idle interstitial (see useBrandShowcase)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── The animation switch ─────────────────────────────────────────────────────
+// The six-beat story below is turned OFF. Everything that draws it — this file's
+// LAYERS/BrandJourney markup, the whole "brand journey loader" block in
+// src/index.css, the showcase, the boot gate — is left intact and untouched;
+// this one constant is the only thing standing between it and being live again.
+// Flip it back to `true` and every call site returns to the animated mark with
+// no other edit anywhere.
+//
+// While it is false, every loader in the app renders <StillMark/> instead: the
+// finished mark, held still, inside a conventional indeterminate progress ring.
+// That is the whole reason the switch is here rather than in the call sites —
+// there are ten of them across App.jsx, AuthGate, the parent app, the SAT panel
+// and the roadmap, and they should not each have to know which loader is current.
+//
+// Two consequences worth knowing about, both handled below:
+//   • useFirstPassGate stops holding the boot screen open for a full pass. The
+//     8s hold exists so nobody sees two frames of a book opening and a cut; with
+//     nothing to play, holding a static screen open for 8s is just a stall.
+//   • useBrandShowcase never fires. The idle interstitial exists to show the
+//     story to students whose data always arrives too fast to see it, which is
+//     meaningless when there is no story to show.
+export const JOURNEY_ANIMATION_ENABLED = false;
+
 // One pass of the six beats. Long enough for each to land and be understood,
 // short enough that nobody sitting through it feels stuck. Every keyframe in
 // index.css is a percentage of this, so changing it here retimes the whole
@@ -54,10 +77,81 @@ const LAYERS = [
 // across — so small call sites get the finished mark instead of the story.
 const MIN_STORY_PX = 96;
 
+// The ring's sweep, blue → violet → cyan: the mark's own three brand hues, read
+// in the order the journey's ascend beat closes them. Declared once and shared by
+// both rings (the journey's and the still loader's) rather than written out at
+// each <defs>, so the two can never drift into being almost the same gradient —
+// which is worse than being two different ones on purpose.
+const RING_STOPS = [['0%', '#2d7fff'], ['50%', '#8b5cf6'], ['100%', '#22d3ee']];
+
+function RingGradient({ id }) {
+  return (
+    <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+      {RING_STOPS.map(([offset, color]) => (
+        <stop key={offset} offset={offset} stopColor={color} />
+      ))}
+    </linearGradient>
+  );
+}
+
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false;
   if (document.documentElement.hasAttribute('data-reduce-motion')) return true;
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+}
+
+/**
+ * The still loader — what every call site renders while JOURNEY_ANIMATION_ENABLED
+ * is false.
+ *
+ * Deliberately ordinary, and finished rather than assembling: the completed brand
+ * mark, motionless, seated on the same pool of deep space the journey uses (so it
+ * stays legible on the light palettes, where the climber is near-white), inside a
+ * thin progress ring that sweeps.
+ *
+ * The sweep is the one moving part, and it earns its place — a completely
+ * motionless loading screen is indistinguishable from a frozen one, which is the
+ * single worst thing a loading screen can be. It is a transform on an SVG stroke,
+ * so it runs on the compositor and costs nothing while the bundle is parsing, and
+ * the reduced-motion rule in index.css stops it dead like everything else.
+ */
+function StillMark({ size = 220, progress = true, style, className = '' }) {
+  return (
+    <div
+      className={className}
+      // The size variable is set here, on the wrapper, not on .msp-still — the
+      // progress track is a SIBLING of the mark, and both size themselves off it.
+      style={{ '--msp-still-size': `${size}px`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: size * 0.09, ...style }}
+    >
+      <div className="msp-still" aria-hidden>
+        <svg className="msp-still-ring" viewBox="0 0 100 100">
+          <defs><RingGradient id="mspStillStroke" /></defs>
+          {/* The unfilled groove, so the sweep reads as progress around a track
+              rather than as a lone arc floating in space. */}
+          <circle className="msp-still-ring-track" cx="50" cy="50" r="46" pathLength="1" />
+          <circle
+            className="msp-still-ring-sweep"
+            cx="50" cy="50" r="46"
+            pathLength="1" strokeDasharray="0.26 0.74"
+            stroke="url(#mspStillStroke)"
+          />
+        </svg>
+        <img
+          className="msp-still-mark"
+          src="/brand/mark.png"
+          alt="" draggable={false}
+          // 88 kB against logo.png's 1.2 MB, and the identical mark: brand/mark.png
+          // is cut from logo.png itself by scripts/extractBrandLayers.mjs.
+          decoding="async"
+        />
+      </div>
+      {progress && (
+        <div className="msp-still-track">
+          <span className="msp-still-fill" />
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -83,9 +177,18 @@ export function BrandJourney({
     // Fires off the clock rather than off animationend: the layers finish at
     // different keyframes, and under reduced motion none of them animate at
     // all, so the timer is the one signal that is always right.
-    const t = setTimeout(onDone, duration);
+    //
+    // With the animation switched off there is no pass to wait for, so the
+    // callback fires on the next tick instead. Callers use it to release a gate
+    // (BrandLoaderScreen -> onFirstPass), and a gate held open for eight seconds
+    // over a screen that is not doing anything is just a stall.
+    const t = setTimeout(onDone, JOURNEY_ANIMATION_ENABLED ? duration : 0);
     return () => clearTimeout(t);
   }, [duration, onDone]);
+
+  if (!JOURNEY_ANIMATION_ENABLED) {
+    return <StillMark size={size} progress={progress} style={style} className={className} />;
+  }
 
   // Rendered as the finished mark when it is too small to read as a story.
   if (size < MIN_STORY_PX) {
@@ -117,13 +220,7 @@ export function BrandJourney({
           {/* The ascend ring sits under the star so the star still breaks
               through the top of it, the way it does in the mark. */}
           <svg className="msp-j-ring" viewBox="0 0 100 100" aria-hidden>
-            <defs>
-              <linearGradient id="mspJRingStroke" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#2d7fff" />
-                <stop offset="50%" stopColor="#8b5cf6" />
-                <stop offset="100%" stopColor="#22d3ee" />
-              </linearGradient>
-            </defs>
+            <defs><RingGradient id="mspJRingStroke" /></defs>
             <circle
               cx="50" cy="50" r="46"
               pathLength="1" strokeDasharray="1"
@@ -247,6 +344,10 @@ const FIRST_PASS_KEY = 'msp_journey_boot_played';
 export function useFirstPassGate(duration = JOURNEY_MS) {
   const [played, setPlayed] = useState(() => {
     if (typeof window === 'undefined') return true;
+    // Nothing to wait for while the animation is off — see JOURNEY_ANIMATION_ENABLED.
+    // Reported as already-played so the boot screen lasts exactly as long as the
+    // boot actually does.
+    if (!JOURNEY_ANIMATION_ENABLED) return true;
     if (prefersReducedMotion()) return true;
     try { return sessionStorage.getItem(FIRST_PASS_KEY) === '1'; } catch { return false; }
   });
@@ -305,6 +406,10 @@ export function useBrandShowcase(trigger, enabled = true) {
     // The very first value of `trigger` is the tab the app booted on; the boot
     // loader has just played, so that one is not a cue.
     if (first.current) { first.current = false; return undefined; }
+    // The showcase exists only to show the six beats to students who never wait
+    // long enough to see them. With the animation off there is nothing to show,
+    // and a full-screen overlay on every tab change would be pure interruption.
+    if (!JOURNEY_ANIMATION_ENABLED) return undefined;
     if (!enabled || showing) return undefined;
     if (prefersReducedMotion()) return undefined;
     if (Date.now() - lastShownAt() < SHOWCASE_GAP_MS) return undefined;

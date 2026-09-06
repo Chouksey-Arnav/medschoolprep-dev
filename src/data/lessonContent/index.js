@@ -15,6 +15,11 @@ import { BIOMED_RESEARCH_CONTENT } from './biomedResearch.js';
 import { PHYSICAL_OCCUP_THERAPY_CONTENT } from './physicalOccupTherapy.js';
 import { PUBLIC_HEALTH_CONTENT } from './publicHealth.js';
 import { HEALTH_ADMIN_CONTENT } from './healthAdmin.js';
+// The foundations tier (see data/foundationUnits.js) is not a pathway — its two
+// units are appended to every pathway and share one id space, so its content
+// merges in here exactly like a pathway's does.
+import { COURSE_STRATEGY_CONTENT } from './courseStrategy.js';
+import { CERTIFICATION_CONTENT } from './certifications.js';
 
 export const LESSON_CONTENT = {
   ...EXPLORING_CONTENT,
@@ -27,4 +32,6 @@ export const LESSON_CONTENT = {
   ...PHYSICAL_OCCUP_THERAPY_CONTENT,
   ...PUBLIC_HEALTH_CONTENT,
   ...HEALTH_ADMIN_CONTENT,
+  ...COURSE_STRATEGY_CONTENT,
+  ...CERTIFICATION_CONTENT,
 };

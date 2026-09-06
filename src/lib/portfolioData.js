@@ -36,6 +36,16 @@ const RESOURCE_MAP = {
   // was created to end.
   test_scores: 'testScores',
   admission_intake: 'admissionIntake',
+  // The Narrative Method Engine's inputs (supabase/migrations/0025_narrative_engine.sql).
+  // Fetched with the rest of the snapshot because the panel reads it on mount,
+  // so it costs no extra round trip.
+  //
+  // `narrative_runs` is deliberately NOT here. It is the append-only history of
+  // kept readings — nothing reads it until a student opens the trend, and every
+  // row in this map is fetched on every Portfolio load by every student,
+  // including the large majority who never open this panel. loadRuns() fetches
+  // it on demand instead.
+  narrative_profile: 'narrativeProfile',
   // The MedEx Score's weekly seals. In the shared snapshot because the score is
   // computed from these same rows — fetching the history separately would mean
   // the Home card and the breakdown panel could seal against two different

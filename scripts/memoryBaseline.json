@@ -1,0 +1,179 @@
+{
+  "note": "Measured by scripts/verifyMemory.mjs. Re-record deliberately with `npm run verify:memory -- --update`.",
+  "recordedAt": "2026-09-03",
+  "routes": {
+    "/home": {
+      "nodes": 693,
+      "listeners": 284
+    },
+    "/sat/overview": {
+      "nodes": 682,
+      "listeners": 434
+    },
+    "/sat/baseline": {
+      "nodes": 402,
+      "listeners": 396
+    },
+    "/sat/diagnostic": {
+      "nodes": 384,
+      "listeners": 396
+    },
+    "/sat/practice": {
+      "nodes": 420,
+      "listeners": 414
+    },
+    "/sat/tests": {
+      "nodes": 556,
+      "listeners": 401
+    },
+    "/sat/review": {
+      "nodes": 384,
+      "listeners": 400
+    },
+    "/sat/skills": {
+      "nodes": 981,
+      "listeners": 455
+    },
+    "/sat/library": {
+      "nodes": 799,
+      "listeners": 472
+    },
+    "/sat/toolkit": {
+      "nodes": 548,
+      "listeners": 406
+    },
+    "/sat/scores": {
+      "nodes": 406,
+      "listeners": 402
+    },
+    "/prep/diagnostic": {
+      "nodes": 827,
+      "listeners": 450
+    },
+    "/prep/pathways": {
+      "nodes": 949,
+      "listeners": 453
+    },
+    "/prep/quizzes": {
+      "nodes": 921,
+      "listeners": 572
+    },
+    "/prep/flashcards": {
+      "nodes": 1348,
+      "listeners": 577
+    },
+    "/prep/coach": {
+      "nodes": 744,
+      "listeners": 453
+    },
+    "/prep/library": {
+      "nodes": 1956,
+      "listeners": 758
+    },
+    "/portfolio/overview": {
+      "nodes": 961,
+      "listeners": 823
+    },
+    "/portfolio/resume": {
+      "nodes": 713,
+      "listeners": 699
+    },
+    "/portfolio/opportunities": {
+      "nodes": 2139,
+      "listeners": 878
+    },
+    "/portfolio/applying": {
+      "nodes": 872,
+      "listeners": 856
+    },
+    "/portfolio/milestones": {
+      "nodes": 877,
+      "listeners": 699
+    },
+    "/roadmap/overview": {
+      "nodes": 315,
+      "listeners": 645
+    },
+    "/roadmap/year": {
+      "nodes": 315,
+      "listeners": 645
+    },
+    "/roadmap/climb": {
+      "nodes": 315,
+      "listeners": 645
+    },
+    "/roadmap/seasons": {
+      "nodes": 315,
+      "listeners": 375
+    },
+    "/roadmap/list": {
+      "nodes": 315,
+      "listeners": 375
+    },
+    "/roadmap/intake": {
+      "nodes": 294,
+      "listeners": 373
+    },
+    "/plans": {
+      "nodes": 311,
+      "listeners": 378
+    },
+    "/progress/overview": {
+      "nodes": 431,
+      "listeners": 408
+    },
+    "/progress/streak": {
+      "nodes": 1148,
+      "listeners": 446
+    },
+    "/progress/quests": {
+      "nodes": 623,
+      "listeners": 408
+    },
+    "/progress/verified": {
+      "nodes": 443,
+      "listeners": 393
+    },
+    "/progress/performance": {
+      "nodes": 664,
+      "listeners": 409
+    },
+    "/progress/achievements": {
+      "nodes": 704,
+      "listeners": 393
+    },
+    "/settings/profile": {
+      "nodes": 321,
+      "listeners": 403
+    },
+    "/settings/study": {
+      "nodes": 470,
+      "listeners": 531
+    },
+    "/settings/family": {
+      "nodes": 351,
+      "listeners": 399
+    },
+    "/settings/appearance": {
+      "nodes": 658,
+      "listeners": 431
+    },
+    "/settings/medabrain": {
+      "nodes": 294,
+      "listeners": 398
+    },
+    "/settings/data": {
+      "nodes": 338,
+      "listeners": 405
+    },
+    "/settings/account": {
+      "nodes": 325,
+      "listeners": 405
+    }
+  },
+  "heap": {
+    "startMB": 59.22,
+    "endMB": 57.72,
+    "perCycleMB": -0.25
+  }
+}

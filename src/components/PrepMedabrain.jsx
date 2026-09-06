@@ -4,6 +4,10 @@ import toast from 'react-hot-toast';
 import { Brain, X, Send, Loader2, RotateCcw } from 'lucide-react';
 import { C, glass, tint, accentGrad } from '../lib/theme';
 import { buildPrepSystemPrompt } from '../lib/studentProfile';
+// The safety pass runs on every chat surface, not only the head coach — a student
+// in trouble does not pick the tab we thought of. See src/lib/safety/pass.js.
+import { runSafetyPass } from '../lib/safety/pass';
+import CrisisResourceCard from './safety/CrisisResourceCard';
 import { renderMarkdown } from '../lib/renderMarkdown';
 import MedabrainLauncher from './MedabrainLauncher';
 import { aiLane } from '../lib/aiLane';
@@ -77,6 +81,7 @@ export default function PrepMedabrain({
     setInput('');
     setLoading(true);
     try {
+      const safety = await runSafetyPass(trimmed, { surface: 'prep' });
       const sys = buildPrepSystemPrompt({
         user, pathwayLabel, gradeLabel,
         lesson, unit, articleSections, keyTakeaways, objectives, unitTitles, lessonNote,
@@ -84,11 +89,18 @@ export default function PrepMedabrain({
         recentActivitySummary,
         lessonHighlights, notesDigest, highlightsDigest, feedbackSummary, paceText,
         parallelPathwaysSummary,
+        safetyBlock: safety.block,
       });
       const res = await fetch('/api/groq', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ system: sys, messages: nextMsgs.slice(-10), purpose: 'prep', maxTokens: 1400, lane: aiLane() }),
+        body: JSON.stringify({
+          system: sys, messages: nextMsgs.slice(-10), purpose: 'prep', maxTokens: 1400,
+          ...(safety.safetyTier ? { safetyTier: safety.safetyTier } : {}),
+          // Whose rate-limit budget this request spends. Without it every request from one
+          // school's NAT shares a single allowance — see src/lib/aiLane.js.
+          lane: aiLane(),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `Medabrain error (${res.status})`);
@@ -193,6 +205,11 @@ export default function PrepMedabrain({
                 )}
               </div>
 
+
+              {/* Support resources, above the composer rather than in the thread —
+                  a message scrolls away and this must not. Renders nothing until
+                  the safety pass has armed it. */}
+              <div style={{ padding: '0 12px', flexShrink: 0 }}><CrisisResourceCard compact /></div>
               <form onSubmit={e => { e.preventDefault(); send(); }} style={{ padding: 12, borderTop: `1px solid ${C.b1}`, display: 'flex', gap: 8, flexShrink: 0 }}>
                 <input
                   value={input} onChange={e => setInput(e.target.value)}

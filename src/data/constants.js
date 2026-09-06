@@ -1,4 +1,5 @@
 // All non-quiz, non-elib constants
+import { FOUNDATION_UNITS } from './foundationUnits.js';
 
 // ── LEARNING PATHS ────────────────────────────────────────────────────────────
 // Medicine & health-career study tracks for college-bound high schoolers.
@@ -746,6 +747,28 @@ export const PATHS = {
     ]
   },
 };
+
+// ── THE FOUNDATIONS TIER, ON EVERY TRACK ──────────────────────────────────────
+// Course strategy and certifications are decisions a future nurse and a future
+// radiologist make against the same transcript and the same course catalog, so
+// they are not pathway content — they are the same two units on all ten tracks,
+// sharing one id space and therefore one progress record. Finishing "Math
+// sequencing" on the nursing track finishes it on the physician track, because
+// it is the same lesson and the student already read it.
+//
+// APPENDED, never prepended, and that is load-bearing. Lesson availability is
+// computed from a unit's INDEX in this array (`lessonState` in App.jsx gates a
+// unit behind the one before it), so putting these first would have renumbered
+// every existing unit and moved every existing student's gate. At the end, every
+// index above is untouched. The units carry `openAlways`, which lifts the gate
+// for them specifically — a sophomore whose course selection sheet is due this
+// week cannot be told to finish three biology units first.
+//
+// The four-year map (src/lib/fourYearMap.js) hoists this tier above the year
+// rail for display, so "last in the array" never means "last on the screen".
+for (const path of Object.values(PATHS)) {
+  path.units = [...path.units, ...FOUNDATION_UNITS];
+}
 
 // ── UNIT STAGE LABELS ─────────────────────────────────────────────────────────
 // Display metadata for the `stage` field the expanded pathways' units carry.

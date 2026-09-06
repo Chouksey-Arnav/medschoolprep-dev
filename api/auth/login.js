@@ -22,6 +22,7 @@ import { getSupabaseAdmin, withRetry } from '../_lib/supabaseAdmin.js';
 import { verifyPassword } from '../_lib/password.js';
 import { consumeVerificationToken } from '../_lib/verificationToken.js';
 import { serializeUser } from '../_lib/serializeUser.js';
+import { verifyRecaptcha } from '../_lib/recaptcha.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -50,6 +51,15 @@ export default async function handler(req, res) {
 
   if (!EMAIL_RE.test(email) || (!password && !verificationToken)) {
     return res.status(400).json({ error: 'Enter your email and password.' });
+  }
+
+  // Only the password path is gated — the code path already proved inbox ownership through
+  // send-otp's own reCAPTCHA check, and gating it a second time would just add friction.
+  if (password) {
+    const recaptchaOk = await verifyRecaptcha({ token: body?.recaptchaToken, ip, action: 'login' });
+    if (!recaptchaOk) {
+      return res.status(400).json({ error: 'Could not verify you\'re not a robot. Please try again.', reason: 'recaptcha_failed' });
+    }
   }
 
   try {

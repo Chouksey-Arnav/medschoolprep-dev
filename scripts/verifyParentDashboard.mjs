@@ -95,6 +95,11 @@ const STUDENT_ONLY = [
   'api/reward-claim.js',
   'api/data/[resource].js',
   'api/lesson-feedback.js',
+  // The safety review queue's write end. Student-only and deliberately so: a
+  // safety event is a record of something a student said to Medabrain in a
+  // conversation their parents cannot see, and the privacy of that channel is
+  // what made the disclosure possible. No parent surface may read or write it.
+  'api/safety-event.js',
 ];
 
 /** Handlers that must be parent-only: they return another person's data. */

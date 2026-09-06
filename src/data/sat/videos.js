@@ -128,7 +128,6 @@ export const SAT_VIDEOS = [
   { yt: 'AdBwgFlfxJQ', title: 'SAT Khan Academy Solving Systems of Linear Equations Word Problems', channel: 'Scalar Learning', scope: 'skill', skills: ['systems_linear'], kind: 'lesson' },
   { yt: 'tx74WZPtpPo', title: 'Linear Systems 3 Cases: No Solutions, 1 Solution, Infinitely Many Solutions', channel: 'SAT Prep from a 1600 Scorer and Ivy League Grad', scope: 'skill', skills: ['systems_linear'], kind: 'lesson' },
   { yt: 'KO2SzlUOZ2M', title: 'SAT Khan Academy Solving Systems of Linear Inequalities Word Problems Level 2', channel: 'Scalar Learning', scope: 'skill', skills: ['linear_inequalities'], kind: 'lesson' },
-  { yt: 'S8DKE_WIJ14', title: 'SAT MATH: Solving Linear Inequalities', channel: 'Juni Learning', scope: 'skill', skills: ['linear_inequalities'], kind: 'lesson' },
   { yt: 'u5Od6BBF9Qw', title: 'SAT Math: Linear Inequalities', channel: 'Point Avenue', scope: 'skill', skills: ['linear_inequalities'], kind: 'lesson' },
 
   // ══ Math · Advanced Math ══════════════════════════════════════════════════
@@ -144,7 +143,6 @@ export const SAT_VIDEOS = [
 
   // ══ Math · Problem-Solving and Data Analysis ══════════════════════════════
   { yt: 'rytygT3oFO4', title: 'All of Problem Solving and Data Analysis on the SAT', channel: 'James Lu SAT', scope: 'domain', domains: ['psda'], kind: 'lesson' },
-  { yt: 'B0oKEvfQCro', title: 'SAT MATH: Ratios, Rates, Units, & Proportional Relationships', channel: 'Juni Learning', scope: 'skill', skills: ['ratios_rates_units'], kind: 'lesson' },
   { yt: 'VSusHQopnjU', title: 'SAT Math: Ratios, Rates, and Proportions', channel: 'Brain Buffs Tutoring', scope: 'skill', skills: ['ratios_rates_units'], kind: 'lesson' },
   { yt: 'mp1WpBVJP5w', title: 'SAT Math · Ratios, rates, proportional relationships, and units', channel: 'In Hak Youn (Peter Youn)', scope: 'skill', skills: ['ratios_rates_units'], kind: 'lesson' },
   { yt: 'wThmYHwbOVo', title: 'All of Percentages on the SAT', channel: 'James Lu SAT', scope: 'skill', skills: ['percentages'], kind: 'lesson' },

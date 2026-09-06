@@ -289,7 +289,11 @@ export default function AdmissionCalculatorPanel({
 
           <div style={R({ gap: 8, flexWrap: 'wrap' })}>
             <button style={btnG({ fontSize: 12 })}
-              onClick={() => { exportAdmissionEstimates(results, { completeness }); toast.success('Exported — the PDF carries the same ranges and the same caveats as the screen.'); }}>
+              // Awaited so the confirmation follows the document rather than racing it:
+              // exportAdmissionEstimates now fetches the PDF renderer on first use
+              // (see src/lib/exportPDF.js), so on a slow connection the un-awaited
+              // version would have claimed success before anything was rendered.
+              onClick={async () => { await exportAdmissionEstimates(results, { completeness }); toast.success('Exported — the PDF carries the same ranges and the same caveats as the screen.'); }}>
               <FileDown size={13} /> Export these estimates as PDF
             </button>
           </div>

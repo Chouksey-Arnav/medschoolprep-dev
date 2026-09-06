@@ -20,7 +20,18 @@ export default defineConfig({
       // Registration now happens explicitly through the `useRegisterSW` hook (PwaUpdatePrompt),
       // which is the supported way to get a controllable, non-disruptive update flow.
       injectRegister: false,
-      includeAssets: ['icon.svg', 'favicon.png'],
+      // icon.svg deliberately dropped from this list. `includeAssets` adds files to
+      // the precache manifest directly, BYPASSING globPatterns and globIgnores — so
+      // the exclusion below was silently doing nothing for it and the 1.58 MB file
+      // was still being pushed to every device on install. Worth knowing when
+      // reading the plugin's build summary: it reports the precache size WITHOUT
+      // includeAssets entries counted, so the number it prints was 606 KB while the
+      // manifest genuinely totalled 2.19 MB.
+      //
+      // Nothing references icon.svg any more either — index.html's favicon is the
+      // PNG pair (see the comment there). It stays in public/ and is served on
+      // request; it is simply not precached.
+      includeAssets: ['favicon.png'],
       manifest: {
         name: 'MedSchoolPrep',
         short_name: 'MedPrep',
@@ -36,7 +47,45 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // ── What gets precached, and why this list is so much shorter than it was ──
+        //
+        // This used to be ['**/*.{js,css,html,ico,png,svg,woff2}'], which is to say
+        // "everything in dist/". That built a precache manifest of 58 entries and
+        // 10.2 MB, and a precache is not a lazy cache: the service worker downloads
+        // every entry on install, in the background, on first visit — and again, for
+        // every entry whose hash changed, on every single deploy. On a phone on cell
+        // data that is 10 MB the student never asked for and cannot see, repeated
+        // each time we ship.
+        //
+        // What is left here is the shell: the HTML, the stylesheet, the display
+        // fonts and the handful of small icons. That is what has to be in the cache
+        // ahead of time, because it is what a cold offline navigation needs before
+        // any JavaScript has run. It comes to well under a megabyte.
+        //
+        // Everything else — every JS chunk, every KaTeX font — moves to the
+        // `app-assets` CacheFirst rule below, which caches each file permanently the
+        // first time it is actually requested. Offline still works; it just means
+        // "the parts of the app you have opened" rather than "all 2.4 MB of the MCAT
+        // quiz bank, whether or not you have ever tapped Quizzes".
+        //
+        // safety-resources.json is named explicitly rather than swept in by a
+        // `**/*.json` glob. It is the crisis-line card's content (see
+        // src/lib/safety/resources.js), 2 kB, and the one file in this build where
+        // being unavailable has a consequence worse than a slow render. That module
+        // already falls back to compiled-in constants precisely so a student is
+        // "never offline-blocked out of a phone number" — this makes the real,
+        // editable copy available offline too, so a corrected number survives losing
+        // signal rather than silently reverting to the bundled one.
+        globPatterns: ['**/*.{css,html,woff2}', 'icon-*.png', 'favicon.png', 'apple-touch-icon.png', 'brand/mark.png', 'safety-resources.json'],
+        // The three biggest files in the build, none of which any visitor needs in
+        // advance and two of which nothing on a cold boot draws at all:
+        //   icon.svg      1.58 MB — the mark exported with its glow art. No longer
+        //                           referenced as a favicon either (see index.html).
+        //   logo.png      1.19 MB — the 1254px master. Nothing renders it any more;
+        //                           AnimatedLogo draws icon-512.png.
+        //   logo-mark.png  389 kB — landing page only, at 19–30px, well after boot.
+        // Left in dist/ and served normally; simply not pushed at everybody up front.
+        globIgnores: ['**/icon.svg', '**/logo.png', '**/logo-mark.png'],
         // A service worker turns every navigation into "serve index.html from
         // cache", which is exactly right for /sat/practice and exactly wrong for
         // /sitemap.xml — anyone with the PWA installed (or who has simply
@@ -63,6 +112,31 @@ export default defineConfig({
         // rather than excluding it from the offline cache.
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         runtimeCaching: [
+          {
+            // Every hashed build asset: the JS chunks, the KaTeX fonts, anything
+            // else Vite fingerprints into /assets/.
+            //
+            // CacheFirst, not StaleWhileRevalidate, and that choice is the whole
+            // point. These filenames contain a content hash, so a given URL's bytes
+            // can never change — a new build produces a new filename. Revalidating
+            // is therefore guaranteed-wasted network on every single request, which
+            // is exactly the kind of invisible recurring cost this whole pass is
+            // about. CacheFirst asks the network once per file, ever.
+            //
+            // A chunk the student never opens is never fetched at all. A chunk they
+            // do open is theirs offline from then on, without a 10 MB toll on
+            // everyone else.
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/assets/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'app-assets',
+              // Comfortably more than one build's worth of chunks and fonts, so
+              // nothing thrashes; old builds' entries age out on their own rather
+              // than being evicted while still in use.
+              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 90 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'CacheFirst',
@@ -98,7 +172,14 @@ export default defineConfig({
           'charts':        ['chart.js','react-chartjs-2'],
           'ai-tools':      ['marked','dompurify','katex'],
           'db-search':     ['dexie','fuse.js','ts-fsrs'],
-          'utils':         ['canvas-confetti','react-hot-toast','jspdf'],
+          // jspdf deliberately NOT listed here any more. Naming it in a manualChunk
+          // pins it into `utils`, and `utils` is eagerly loaded because
+          // canvas-confetti and react-hot-toast are imported at the top of App.jsx —
+          // so listing it here would have quietly cancelled the dynamic import in
+          // src/lib/exportPDF.js and kept the whole PDF engine in the boot path.
+          // Left unlisted, Rollup follows that import() and gives it its own chunk,
+          // fetched the first time somebody exports something.
+          'utils':         ['canvas-confetti','react-hot-toast'],
           'quiz-data':     ['./src/data/quizzes/index.js'],
           'app-data':      ['./src/data/elib.js','./src/data/constants.js'],
         }

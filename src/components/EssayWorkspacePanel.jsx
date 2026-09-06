@@ -13,6 +13,11 @@ import { getCached, setCached, dailyKey } from '../lib/aiCache';
 import { renderMarkdown } from '../lib/renderMarkdown';
 import { getWhyMedicineLabel, getDreamRoleLabel } from '../lib/studentProfile';
 import { buildEssayCriticPrompt, critiqueEssay } from '../lib/essayCritique';
+// Critique passes are counted per essay: it is the metering point when this
+// product has a paid tier, and — today — it is what lets essay mode notice a
+// student on their fifth pass of a draft that has not moved. See
+// src/lib/essayCritiquePasses.js.
+import { recordCritiquePass, critiquePassCount } from '../lib/essayCritiquePasses';
 import { effectiveGradeStage } from '../lib/timeline';
 import { isEssayPreviewGrade, trackerUnlockLabel, WHY_PATHWAY } from '../lib/healthEssays';
 import { collectProgramPrompts, summarizeProgramPrompts } from '../lib/programEssayPrompts';
@@ -20,6 +25,10 @@ import { buildVersionArc, summarizeArcForPrompt } from '../lib/essayVersions';
 import EssayCritique from './EssayCritique';
 import SupplementalEssaysCard from './SupplementalEssaysCard';
 import AiPolicyNotice from './portfolio/AiPolicyNotice';
+// The Socratic half of essay help — questions and structural feedback, routed
+// through purpose:'essaycoach' so the server-side prose guard applies. See
+// src/lib/essayMode.js and api/_lib/essayProseGuard.js.
+import EssayModeChat from './portfolio/EssayModeChat';
 import WhyPathwayDoc from './portfolio/WhyPathwayDoc';
 import ReflectionJournal from './portfolio/ReflectionJournal';
 import ProgramPromptsCard from './portfolio/ProgramPromptsCard';
@@ -234,7 +243,11 @@ export default function EssayWorkspacePanel({ accent = C.blue, user = null, grad
         arcSummary: summarizeArcForPrompt(buildVersionArc(versions, draft)),
       });
       const critique = await critiqueEssay({ draft: text, system });
-      setCritiques(prev => ({ ...prev, [id]: { loading: false, error: null, critique, ofWords: words } }));
+      // Counted only on success. A pass that errored cost the student nothing
+      // and must not count against them — the distinction a metering point has
+      // to get right from the first day it exists rather than the day it bills.
+      const passes = recordCritiquePass(id, { mode: 'draft' });
+      setCritiques(prev => ({ ...prev, [id]: { loading: false, error: null, critique, ofWords: words, passes } }));
     } catch (err) {
       setCritiques(prev => ({ ...prev, [id]: { loading: false, error: err.message, critique: null, ofWords: words } }));
     }
@@ -261,6 +274,25 @@ export default function EssayWorkspacePanel({ accent = C.blue, user = null, grad
   // ── The programs the student actually tracked ─────────────────────────────
   // A tracked combined-degree program is a college-list row (see collegeRowFor in
   // src/lib/combinedDegree.js), so the college list is the join key and no second store exists.
+  // One line of what this student has actually done, for essay mode to point at
+  // when the draft is vague exactly where their record is concrete. Deliberately
+  // the same rows the critique already reads, so the two cannot disagree about
+  // what the student has done.
+  const essayPortfolioSummary = useMemo(() => {
+    if (!portfolioCtx) return null;
+    const parts = [];
+    const acts = (portfolioCtx.activities || []).slice(0, 8)
+      .map(a => `${a.position || a.activity_type}${a.organization ? ` at ${a.organization}` : ''}`).filter(Boolean);
+    if (acts.length) parts.push(`Activities: ${acts.join('; ')}.`);
+    const res = (portfolioCtx.research || []).slice(0, 4).map(r => r.title).filter(Boolean);
+    if (res.length) parts.push(`Research: ${res.join('; ')}.`);
+    const hrs = (portfolioCtx.clinicalHours || []).reduce((s, h) => s + (Number(h.hours) || 0), 0);
+    if (hrs > 0) parts.push(`${hrs} clinical/shadowing hours logged.`);
+    const awards = (portfolioCtx.awards || []).slice(0, 5).map(a => a.title).filter(Boolean);
+    if (awards.length) parts.push(`Awards: ${awards.join('; ')}.`);
+    return parts.length ? parts.join(' ') : null;
+  }, [portfolioCtx]);
+
   const programCards = useMemo(() => collectProgramPrompts({ colleges }), [colleges]);
   const programSummary = useMemo(() => summarizeProgramPrompts(programCards), [programCards]);
 
@@ -494,6 +526,19 @@ export default function EssayWorkspacePanel({ accent = C.blue, user = null, grad
                 <EssayCritique state={activeCritique} onRun={runCritique} disabled={wc < 20} />
               </div>
             )}
+
+            {/* Questions, not prose. Sits under the critique because the two are
+                the same job at two speeds: a verdict on a finished draft, and a
+                conversation about the paragraph in front of them right now. */}
+            <div style={{ marginTop: 12 }}>
+              <EssayModeChat
+                essay={selected} draft={draft} user={user} gradeLabel={gradeLabel}
+                collegeName={colleges.find(c => c.id === selected.college_id)?.name || selected.source_label || null}
+                portfolioSummary={essayPortfolioSummary}
+                arcSummary={summarizeArcForPrompt(buildVersionArc(versions, draft))}
+                critiquePasses={critiquePassCount(selected.id)}
+                isMobile={isMobile} />
+            </div>
 
             {versions.length > 0 && (
               <div style={{ marginTop: 16 }}>

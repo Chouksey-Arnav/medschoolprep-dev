@@ -239,14 +239,14 @@ section('4. The free preview is one real page of real data');
 eq('the free tier gets exactly one page', E.PAGE_LIMIT_FREE, 1);
 
 {
-  const previewDoc = exportPortfolioDossier(app, { preview: true, save: false });
+  const previewDoc = await exportPortfolioDossier(app, { preview: true, save: false });
   eq('the preview is a single page', previewDoc.internal.getNumberOfPages(), 1);
 
-  const fullDoc = exportPortfolioDossier(app, { save: false });
+  const fullDoc = await exportPortfolioDossier(app, { save: false });
   assert('the full document is longer than the preview',
     fullDoc.internal.getNumberOfPages() > 1, `got ${fullDoc.internal.getNumberOfPages()} pages`);
 
-  const archiveDoc = exportPortfolioDossier(build('archive', 'student'), { save: false });
+  const archiveDoc = await exportPortfolioDossier(build('archive', 'student'), { save: false });
   assert('the archive is at least as long as the application version',
     archiveDoc.internal.getNumberOfPages() >= fullDoc.internal.getNumberOfPages());
 }

@@ -25,6 +25,28 @@ key pool and a cost-appropriate default model:
 | `sat`        | SAT drills, hints, step-by-step explanations, and coach               | Sage (best)        | `GROQ_API_KEY_SAT`          |
 | `essay`      | Essay critique + supplemental-prompt lookup (Essay Workspace)         | Sage (best)        | `GROQ_API_KEY_ESSAY`        |
 | `roadmap`    | The **Roadmap tab**'s 12-month plan (heaviest generation in the app)   | Oracle (biggest)   | `GROQ_API_KEY_ROADMAP` + `_2` |
+| `essaycoach` | **Essay mode** — the Socratic chat in the Essay Workspace              | Guide              | `GROQ_API_KEY_ESSAY`        |
+| `safety`     | The **safety classifier** — one tier per flagged message, JSON only    | Guide              | `GROQ_API_KEY_SAFETY`       |
+
+### Two purposes that are not about cost
+
+`essaycoach` and `essay` share a key but are separate purposes, because they are
+**enforced** differently. `essay` is the one-shot deep critique, which
+legitimately quotes a student's paragraphs back at them at length. `essaycoach`
+is the Socratic chat, and every response under that purpose is inspected by the
+prose guard in `api/_lib/essayProseGuard.js` and replaced if it contains prose
+the student could submit. Routing essay-mode traffic under any other purpose
+silently turns that enforcement off.
+
+`safety` gets the loosest rate limits in `api/groq.js` and it is deliberate. The
+classifier is not a feature a student invokes — it is a pass over messages the
+app is already sending, and a rate limit that throttles it throttles the
+detection, for exactly the student sending a lot of messages at one in the
+morning. A dedicated key is worth having for the same reason: its traffic should
+not be starved by a busy afternoon on the head coach. Without one it falls back
+to the shared pool like everything else and the layer still works; the
+deterministic screen (`src/lib/safety/classifier.js`) holds regardless, since a
+failed model pass can never clear a screen hit.
 
 `essay` is the one purpose with a two-step fallback: it uses `GROQ_API_KEY_ESSAY` if set, then
 `GROQ_API_KEY_PORTFOLIO` (essay critique *is* portfolio work), then the shared pool. It also runs
@@ -56,6 +78,7 @@ GROQ_API_KEY_PREP=gsk_...         # 6th account → in-context prep help
 GROQ_API_KEY_PLAN=gsk_...         # 7th account → Plans tab full day-by-day roadmap generation
 GROQ_API_KEY_SAT=gsk_...          # 8th account → SAT tab drills, hints, and explanations
 GROQ_API_KEY_ESSAY=gsk_...        # 9th account → essay critique + supplemental essay prompts
+GROQ_API_KEY_SAFETY=gsk_...       # 10th account → the safety classifier (see the note below)
 
 # The Roadmap tab's TWO-key pool — the only purpose with two dedicated accounts.
 # Set BOTH if you can: students are split evenly across them (see below), which
@@ -313,21 +336,16 @@ is reached only when every Groq key has already failed, it is never mixed into t
 and it never sees a request Groq could have served — so a free tier lasts, and a paid one bills as
 a function of Groq's downtime rather than of your volume.
 
-Set **any one** of these and it switches itself on:
+This deployment runs on Groq keys only, so layer 2 is **off** and no second vendor is named
+anywhere in the code. It used to ship four hard-coded presets (Cerebras, OpenRouter, Together,
+Gemini), each carrying its own four-tier model map. None was ever configured here, and a model map
+nobody exercises is a map nobody notices going stale — vendors deprecate `gemini-2.5-pro` and
+`llama-3.3-70b` on their own schedule, and the day you finally need the backup is the worst
+possible day to find out it stopped working. The presets are gone; the mechanism stays.
 
-```bash
-CEREBRAS_API_KEY=csk_...     # Cerebras — same open-weight models (gpt-oss-120b, Llama 3.3 70B) at
-                             # comparable speed, so a relief answer is not a worse answer
-OPENROUTER_API_KEY=sk-or-... # OpenRouter — the broadest catalogue and the best single choice if
-                             # you do not want to think about it: one key reaches every model below
-TOGETHER_API_KEY=...         # Together AI — the same open-weight family again
-GEMINI_API_KEY=...           # Google Gemini, through its OpenAI-compatible endpoint. The most
-                             # different of the four, which is what you want in a backup: a Gemini
-                             # outage and a Groq outage have no common cause
-```
-
-Or point it at anything else that speaks the OpenAI chat-completions shape, including a private or
-self-hosted endpoint:
+To switch it on, point it at anything that speaks the OpenAI chat-completions shape — a hosted
+vendor or a private endpoint. All three of the first vars are required together; set fewer and the
+layer stays off rather than half-configured:
 
 ```bash
 FALLBACK_AI_KEY=...
@@ -340,7 +358,8 @@ FALLBACK_AI_LABEL=Reserve      # what it is called in the response
 FALLBACK_AI_JSON_MODE=false    # if the endpoint rejects response_format
 ```
 
-**With none of them set, nothing changes.** The relief layer is an upgrade, never a dependency —
+**With none of them set, nothing changes** — which is the state this deployment is in. The relief
+layer is an upgrade, never a dependency —
 the same contract `api/roadmap.js` holds itself to for durable storage.
 
 ### What it does not change

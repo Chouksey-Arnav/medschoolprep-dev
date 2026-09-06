@@ -404,14 +404,27 @@ export const SECTIONS_BY_SOURCE = (() => {
 /**
  * Which Common App sections a Portfolio surface feeds.
  *
- * Falls back from the most specific key to the least, so a caller that knows its
- * section gets the precise answer and one that only knows its view still gets a
- * useful one. Returns an empty array for a surface that feeds nothing, which is
- * a normal answer — the SAT tab and the Progress tab feed no section of the
- * Common App and should not pretend to.
+ * Returns an empty array for a surface that feeds nothing, which is a normal and
+ * common answer — the SAT tab, the Progress tab, and several Portfolio sections
+ * feed no part of the Common App and must not pretend to.
+ *
+ * ── Why a named section does NOT fall back to its view ──────────────────────
+ * This used to fall back from the specific key to the view-level one, on the
+ * theory that a more general answer beats none. It is the opposite: the
+ * view-level key holds the union of every section under that view, so asking
+ * about one unmapped section returned ALL of them. The Applying page has nine
+ * sections and six mappings, so financial aid, interview prep, combined degrees,
+ * the MedEx Score and the narrative reading each rendered a badge claiming they
+ * fed the Common App's Testing, Writing, College List and Recommenders sections
+ * at once. That is not vague, it is false — the aid panel feeds none of them —
+ * and it appeared on five panels at once.
+ *
+ * So: if the caller NAMES a section, they get that section's mapping or nothing.
+ * The view-level fallback is only for a caller that genuinely has no section to
+ * give, which is the case it was written for.
  */
 export function sectionsFedBy(tab, view, section = null) {
-  if (section && SECTIONS_BY_SOURCE[`${tab}/${view}:${section}`]) return SECTIONS_BY_SOURCE[`${tab}/${view}:${section}`];
+  if (section) return SECTIONS_BY_SOURCE[`${tab}/${view}:${section}`] || [];
   return SECTIONS_BY_SOURCE[`${tab}/${view}`] || [];
 }
 

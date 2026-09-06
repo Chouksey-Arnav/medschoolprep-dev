@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "updated": "2026-08-29",
+  "_comment": "The crisis resources Medabrain surfaces to a student. This file is served statically and read at runtime by src/lib/safety/resources.js, so the numbers, names and wording can be corrected by editing this one file — no code change, no rebuild of the bundle. Every field is validated on load and anything malformed falls back to the compiled-in defaults in src/lib/safety/resources.js, so a bad edit here degrades to the shipped resources rather than to no resources at all. Country is US-only today because the student body is; add entries rather than replacing them if that changes.",
+  "cardTitle": "If things are heavy right now",
+  "cardBody": "You don't have to be in danger to use these. They are free, open 24 hours, and you can text instead of talking.",
+  "dismissLabel": "Hide this",
+  "restoreLabel": "Show support resources",
+  "resources": [
+    {
+      "id": "988",
+      "name": "988 Suicide and Crisis Lifeline",
+      "description": "Call or text 988. Free, confidential, 24/7, anywhere in the US.",
+      "tel": "988",
+      "sms": { "number": "988", "body": "" },
+      "url": "https://988lifeline.org",
+      "primary": true
+    },
+    {
+      "id": "crisis-text-line",
+      "name": "Crisis Text Line",
+      "description": "Text HOME to 741741 to reach a trained volunteer counselor, 24/7.",
+      "sms": { "number": "741741", "body": "HOME" },
+      "url": "https://www.crisistextline.org",
+      "primary": true
+    },
+    {
+      "id": "trevor",
+      "name": "The Trevor Project",
+      "description": "Call 1-866-488-7386 or text START to 678-678 — for LGBTQ young people, 24/7.",
+      "tel": "18664887386",
+      "sms": { "number": "678678", "body": "START" },
+      "url": "https://www.thetrevorproject.org/get-help/",
+      "primary": false
+    },
+    {
+      "id": "emergency",
+      "name": "911 or your nearest emergency room",
+      "description": "If you or someone else is in immediate physical danger, this is the fastest help.",
+      "tel": "911",
+      "primary": false
+    }
+  ]
+}

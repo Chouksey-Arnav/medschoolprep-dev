@@ -318,7 +318,20 @@ if (plansMap) {
   // Score by 40 this month" is a target on a metric rather than on the work, and a student who
   // optimises the metric instead of the portfolio has been actively mis-served. The plan should
   // say "log the 60 shadowing hours you already have"; the score moves because that happened.
-  const CONTENTLESS = new Set(['essay_versions', 'portfolio_evidence', 'credential_suggestions', 'reflection_entries', 'medex_scores']);
+  //
+  // narrative_runs is excluded on exactly the medex_scores grounds, and for once that is not a
+  // convenient parallel — it is the same object. A run is not student-authored: it is OUR reading
+  // of a file, derived from the essays and activities the planner already reads (src/lib/ivy/),
+  // so feeding it back would be the planner reasoning over its own inputs a second time, laundered
+  // through a rubric score. And the task it would generate is the one that engine's own safeguards
+  // exist to forbid: "raise your spike index to 2.0 this month" is a target on a metric rather
+  // than on the work, and the engine is explicit that its numbers describe how a file currently
+  // scans rather than naming something to optimise. The plan should say "get one person outside
+  // your school to vouch for the project"; the reading moves because that happened.
+  //
+  // narrative_profile is NOT excluded, and the difference is the usual one: it is student-authored
+  // and it is a record of what they have actually done and built.
+  const CONTENTLESS = new Set(['essay_versions', 'portfolio_evidence', 'credential_suggestions', 'reflection_entries', 'medex_scores', 'narrative_runs']);
   const serverResources = [...resourcesSrc.matchAll(/^\s*'([a-z_]+)',$/gm)].map(m => m[1]);
   for (const r of serverResources) {
     if (CONTENTLESS.has(r)) continue;

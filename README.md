@@ -4,7 +4,10 @@ Welcome to **MedSchoolPrep** (internally configured as `medschoolprep`), a compr
 
 This workspace is specifically engineered for high school and undergraduate students preparing for college admissions, exams, and future career pathways. All legacy graduate-level/medical depth has been removed or reframed, keeping focus strictly on secondary-to-undergraduate pathways (e.g. SAT/ACT prep, college application portfolios, financial aid, admissions planning, and undergraduate pre-professional tracking).
 
-This README acts as the complete, single source of truth for the entire application, containing its core architecture, system mechanisms, API routes, testing/verification engines, environment variables, and an exhaustive file directory mapping the exact purpose of **every single file in the repository**.
+This README acts as the primary source of truth for the entire application, containing its core architecture, system mechanisms, API routes, testing/verification engines, environment variables, and platform guidelines.
+
+> 🤖 **For AI Agents (Claude, Jules, GPT):**
+> Refer to **`AGENTS.md`** for operational rules, guidelines, dual-deployment rules, and testing workflows, and **`FILE_NAVIGATION.md`** for an exhaustive, 100%-verified file-by-file directory map and Task-to-File Quick Lookup Matrix designed for low-token navigation.
 
 ---
 
@@ -127,6 +130,54 @@ The application operates in a unified monorepo supporting two distinct hosting m
 > ⚠️ **Developer Constraint:**
 > If you create a new endpoint under `api/`, Vercel exposes it automatically as a serverless route. However, under Coolify/VPS, you **must manually import and mount it in `server.js`**. Otherwise, requests will return `404 Not Found` in production.
 
+### Browser-dependent checks and the image build
+
+`npm run build` chains ~50 `verify:*` scripts, and exactly one of them —
+`verify:viewport-fit` — needs a real headless Chromium. That is a hard dependency to
+carry into a production image build: Playwright ships no musl browser, so the Alpine
+build stage installs Alpine's own Chromium (best-effort — a mirror outage or a full
+disk must not stop a release).
+
+If no usable browser is there, the check **skips with a warning instead of failing the
+build**. The assertions themselves are not lost: `.github/workflows/verify.yml` installs
+Playwright's Chromium and runs the whole build with `REQUIRE_BROWSER_CHECKS=1` on every
+push and pull request, where a browser that will not start *is* a failure. So the layout
+bug is still caught before it can be merged — it just no longer decides whether a deploy
+ships.
+
+Set `REQUIRE_BROWSER_CHECKS=1` locally to get the same strictness as CI, or point
+`CHROMIUM_EXECUTABLE_PATH` at a Chromium you already have.
+
+### The production bundle is not the bundle CI builds
+
+Coolify passes every configured environment variable into the image build as a Docker
+`ARG`, which Docker exposes to `RUN` — so `vite build` there sees `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY`, and CI and a plain local build never do. That is not cosmetic:
+`src/lib/supabaseClient.js` resolves to `null` when either is missing, so without them
+Rollup tree-shakes `@supabase/supabase-js` out of the entry graph entirely — **56 KB
+gzipped that only the production bundle carries**.
+
+`verify:payload` therefore keeps one baseline per build shape, in
+`scripts/payloadBaseline.json`, and prints which one it used:
+
+| profile | when | baseline |
+|---|---|---|
+| `oauth-configured` | `VITE_SUPABASE_*` set — every Coolify deploy | 3052 KB gzipped |
+| `oauth-unconfigured` | CI, and `npm run build` locally | 2996 KB gzipped |
+
+`node scripts/verifyPayload.mjs --update` re-baselines **only the profile of the build in
+front of it**, so re-baseline in the same shape of build the number came from. If you ever
+see the two numbers converge or the gap change a lot, something moved in or out of the
+entry graph and is worth a look.
+
+> ⚠️ **Before you set `NODE_ENV=production` as a Coolify *build* variable:**
+> `verify:legal` turns its placeholder-postal-address warning into a hard build failure
+> when `NODE_ENV=production` or `VERCEL_ENV=production` is set. That is deliberate — a
+> notice without a physical address is defective under COPPA § 312.4(d) and GDPR Art.
+> 13(1)(a) — so fix it by putting the real address in `src/legal/legalConfig.js`, not by
+> unsetting the variable. Coolify's *runtime* `NODE_ENV=production` (set in the
+> Dockerfile's second stage) does not reach the build and is unaffected.
+
 ---
 
 ## ✉️ Diagnosing "the email never arrived"
@@ -150,6 +201,8 @@ with SPF/DKIM set up there.
 | `SUPABASE_SERVICE_ROLE_KEY` | String | Server-side high-privilege key used for DB writes and sync operations. |
 | `VITE_SUPABASE_URL` | String | Same as `SUPABASE_URL`, exposed to client build for Google sign-in. |
 | `VITE_SUPABASE_ANON_KEY` | String | Public anon key, used solely for OAuth callbacks on client side. |
+| `RECAPTCHA_SECRET_KEY` | String | Server half of reCAPTCHA v3, checked by signup, password reset, email-code sign-in and password login. **Set it only together with `VITE_RECAPTCHA_SITE_KEY` below.** Alone, it locks every real student out: the server starts requiring a token that a bundle without the site key never sends, and every one of those flows answers `400 Could not verify you're not a robot`. Leaving both unset is a supported state — verification simply does not run. |
+| `VITE_RECAPTCHA_SITE_KEY` | String | Client half, and a **build-time** variable — Vite inlines it into the bundle, so it must be an `ARG` in the Dockerfile (it is) and set at build time. Setting it only as a runtime variable has no effect whatsoever: the bundle was already written. |
 | `BREVO_SMTP_HOST` / `BREVO_SMTP_PORT` | String/Num | SMTP relay host (default: `smtp-relay.brevo.com`) and TLS port (default: `587`). |
 | `BREVO_SMTP_USER` / `BREVO_SMTP_PASS` | String | SMTP login/password for the single Brevo account used for all OTP email (300 emails/day on the free plan). |
 | `BREVO_SMTP_FROM` | String | **Required** — the sender address verified in Brevo (Senders, Domains & Dedicated IPs → Senders). Must not be left unset: an unverified/misaligned "from" is accepted by Brevo's relay (so the app sees success) but can then be silently dropped or spam-foldered by the recipient, which looks identical to "the app never sent it." |

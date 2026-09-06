@@ -6,6 +6,7 @@
 // Password recovery (also used by legacy passwordless accounts to set their first password):
 //   - sendResetCode(email) -> verifyResetCode(email, code) -> resetPassword(email, verificationToken, password)
 import { apiFetch, parseJson, AUTH_TIMEOUT_MS } from './http.js';
+import { getRecaptchaToken } from './recaptcha.js';
 
 const TOKEN_KEY = 'msp_session_token';
 // Where the account-type choice waits out the Google redirect. sessionStorage, not localStorage:
@@ -88,7 +89,10 @@ async function req(path, options = {}) {
   return data;
 }
 
-const sendOtp = (email, purpose) => req('/auth/send-otp', { method: 'POST', body: JSON.stringify({ email, purpose }) });
+const sendOtp = async (email, purpose) => {
+  const recaptchaToken = await getRecaptchaToken('send_otp');
+  return req('/auth/send-otp', { method: 'POST', body: JSON.stringify({ email, purpose, recaptchaToken }) });
+};
 const verifyOtp = (email, code, purpose) => req('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ email, code, purpose }) });
 
 export const sendSignupCode = (email) => sendOtp(email, 'signup');
@@ -101,7 +105,10 @@ export const verifyResetCode = (email, code) => verifyOtp(email, code, 'password
 export const resetPassword = (email, verificationToken, password) =>
   req('/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, verificationToken, password }) });
 
-export const login = (email, password) => req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+export const login = async (email, password) => {
+  const recaptchaToken = await getRecaptchaToken('login');
+  return req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, recaptchaToken }) });
+};
 
 // ── Sign in with an emailed code, no password ────────────────────────────────
 //

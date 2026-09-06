@@ -21,7 +21,7 @@ container?.querySelector('#seo-shell')?.remove();
 // Site-wide "down for maintenance" switch. Flip to true to show
 // MaintenanceNotice instead of the app; false to run the app normally.
 // To turn the maintenance page on/off, just flip this boolean.
-const MAINTENANCE_MODE = true;
+const MAINTENANCE_MODE = false;
 
 ReactDOM.createRoot(container).render(
   <React.StrictMode>
