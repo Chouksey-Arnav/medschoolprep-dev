@@ -59,15 +59,44 @@ const PORTFOLIO_RESOURCE_MAP = {
   // "email one teacher to be the named mentor" is a fifteen-minute job that moves an activity out
   // of Tier 3, and a plan that cannot see the gap cannot ever name it.
   narrative_profile: 'narrativeProfile',
+  // The student-intelligence layer (supabase/migrations/0026_student_intelligence.sql). Each of
+  // these is a record of something the student has actually done, been given, or told us plainly,
+  // which is the test this map applies to everything else in it.
+  //
+  // recommendation_feedback earns its place twice over. It is the only table that records a
+  // student saying no — declined, too expensive, too far away, no longer eligible — and a planner
+  // that cannot see a refusal will keep scheduling the thing that was refused. Re-proposing a
+  // program somebody has already told us they cannot afford is how a plan stops being read.
+  school_context: 'schoolContext',
+  constraints_profile: 'constraintsProfile',
+  quick_notes: 'quickNotes',
+  interest_history: 'interestHistory',
+  service_logs: 'serviceLogs',
+  competitions: 'competitions',
+  checkins: 'checkins',
+  recommendation_feedback: 'recommendationFeedback',
+  activity_role_history: 'activityRoleHistory',
 };
 const PORTFOLIO_RESOURCES = Object.keys(PORTFOLIO_RESOURCE_MAP);
+
+// ZIP and state are collected under one specific consent — matching opportunities near the
+// student — and the plan generator is not that. Everything this map returns is fed to a
+// third-party AI provider, so a column that rides along by accident is a column disclosed for a
+// purpose nobody agreed to. The rest of constraints_profile (time, transport, cost, accessibility)
+// is exactly what a feasible plan has to respect, so the row travels; the location does not.
+function stripUnconsentedLocation(rows) {
+  return rows.map(({ zip_code, state_code, ...rest }) => rest);
+}
 
 // Exported because the plan no longer refreshes only while this tab is mounted — App.jsx runs the
 // same daily window refresh app-wide (see planLiveSignals there), and a second, drifting copy of
 // this list is exactly how one of the two callers ends up generating a Portfolio-blind plan.
 export async function fetchPortfolio() {
   const entries = await Promise.all(
-    PORTFOLIO_RESOURCES.map(async r => [PORTFOLIO_RESOURCE_MAP[r], await listItems(r).catch(() => [])])
+    PORTFOLIO_RESOURCES.map(async r => {
+      const rows = await listItems(r).catch(() => []);
+      return [PORTFOLIO_RESOURCE_MAP[r], r === 'constraints_profile' ? stripUnconsentedLocation(rows) : rows];
+    })
   );
   return Object.fromEntries(entries);
 }
