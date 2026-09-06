@@ -4,6 +4,7 @@ import { Sparkles, Check, X, Loader2 } from 'lucide-react';
 import { C, glass, btn, btnSm, inp, R } from '../../lib/theme';
 import { listItems, createItem, updateItem } from '../../lib/dataApi';
 import { isAcademicUpdateDue } from '../../lib/studentIntel/checkins';
+import useRemoteDataRefresh from '../../lib/useRemoteDataRefresh';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Progressive profile completion — one small question at a time, never a giant
@@ -51,6 +52,9 @@ export default function ProfileIntelPrompt({ accent = C.violet, isMobile = false
     } catch { setSchoolContext(null); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  // load() already leaves the rendered state untouched until the rows arrive, so it needs no
+  // quiet variant — see src/lib/liveSync.js for what fires this.
+  useRemoteDataRefresh(load);
 
   const nextField = useMemo(() => {
     if (schoolContext === undefined) return null;

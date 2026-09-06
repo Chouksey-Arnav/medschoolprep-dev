@@ -5,6 +5,7 @@ import { C, glass, glass2, btn, btnSm, inp, R, CC, pill, tint } from '../../lib/
 import { listItems, createItem, updateItem, deleteItem } from '../../lib/dataApi';
 import { SectionTitle, StatTile } from '../ui/PanelHero';
 import Disclosure, { HelpNote } from '../ui/Disclosure';
+import useRemoteDataRefresh from '../../lib/useRemoteDataRefresh';
 import { serviceSummary } from '../../lib/studentIntel/serviceAnalytics';
 import { SERVICE_HOUR_BENCHMARKS, FRAME_NOTE } from '../../lib/studentIntel/benchmarks';
 
@@ -25,13 +26,18 @@ export default function ServiceLogPanel({ accent = C.rose, isMobile = false, ben
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `quiet` is what makes a background refresh a refresh rather than a flash: a reload driven by
+  // another device must not replace an on-screen list with "Loading your log…" for a moment, and
+  // must not report a failure the student never asked for.
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     try { setEntries(await listItems('service_logs')); }
-    catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
+    catch (err) { if (!quiet) toast.error(err.message); }
+    finally { if (!quiet) setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  // Hours logged on a phone appear here without a reload — see src/lib/liveSync.js.
+  useRemoteDataRefresh(useCallback(() => load({ quiet: true }), [load]));
 
   const summary = useMemo(() => serviceSummary(entries, { benchmarkId, targetDate }), [entries, benchmarkId, targetDate]);
   const sorted = useMemo(() => [...entries].sort((a, b) => String(b.entry_date).localeCompare(String(a.entry_date))), [entries]);

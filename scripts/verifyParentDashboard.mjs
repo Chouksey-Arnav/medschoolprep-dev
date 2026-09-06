@@ -87,6 +87,11 @@ const PUBLIC_HANDLERS = {
 /** Handlers that must be student-only: they read or write one student's own work. */
 const STUDENT_ONLY = [
   'api/progress-sync.js',
+  // The cross-device change poller (src/lib/liveSync.js). It returns only two numbers, but they
+  // are two numbers about a student's account — how many times their data has changed, and when
+  // — and a parent has their own dashboard for that. It is also the most frequently called
+  // endpoint in the app, which is the last place to leave a role check to judgement.
+  'api/sync-state.js',
   'api/master-plan.js',
   // The Roadmap tab's twelve-month plan. Student-only for the same reason the master plan is: it
   // is one student's own work, and a parent account hitting it would write nonsense rows under

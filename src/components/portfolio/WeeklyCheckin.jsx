@@ -5,6 +5,7 @@ import { C, glass, glass2, btn, btnSm, inp, R, CC, tint } from '../../lib/theme'
 import { listItems, createItem } from '../../lib/dataApi';
 import Disclosure, { HelpNote } from '../ui/Disclosure';
 import { isCheckinDue, currentWeekKey } from '../../lib/studentIntel/checkins';
+import useRemoteDataRefresh from '../../lib/useRemoteDataRefresh';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Weekly check-in — brief, in-app only (no email/push, ever), and always
@@ -27,13 +28,19 @@ export default function WeeklyCheckin({ accent = C.blue, isMobile = false }) {
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `quiet` matters more here than elsewhere: this component renders nothing at all while
+  // `loading` is true, so a background refresh that raised the flag would make the whole nudge
+  // vanish and reappear.
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     try { setCheckins(await listItems('checkins')); }
     catch { /* silent — a missed load just means the nudge doesn't show this visit */ }
-    finally { setLoading(false); }
+    finally { if (!quiet) setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  // A check-in written on another device should retire this week's nudge everywhere, not just
+  // where it was written.
+  useRemoteDataRefresh(useCallback(() => load({ quiet: true }), [load]));
 
   const due = useMemo(() => !loading && isCheckinDue(checkins), [loading, checkins]);
 
@@ -97,7 +104,9 @@ export default function WeeklyCheckin({ accent = C.blue, isMobile = false }) {
 /** Past check-ins, as a small collapsible history — separate export so a page can opt in. */
 export function WeeklyCheckinHistory({ accent = C.blue, isMobile = false }) {
   const [checkins, setCheckins] = useState([]);
-  useEffect(() => { listItems('checkins').then(setCheckins).catch(() => {}); }, []);
+  const load = useCallback(() => { listItems('checkins').then(setCheckins).catch(() => {}); }, []);
+  useEffect(() => { load(); }, [load]);
+  useRemoteDataRefresh(load);
   if (!checkins.length) return null;
   const sorted = [...checkins].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   return (

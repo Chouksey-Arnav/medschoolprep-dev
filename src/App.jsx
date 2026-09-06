@@ -69,6 +69,7 @@ import InterviewPrepPanel from './components/InterviewPrepPanel';
 
 import * as DB from './lib/db';
 import * as ProgressSync from './lib/progressSync';
+import { startLiveSync, stopLiveSync, REMOTE_DATA_EVENT } from './lib/liveSync';
 import * as PlanStore from './lib/masterPlanStore';
 import { loadViewState, saveViewState, clearViewState } from './lib/viewState';
 import { SUBVIEWS, bootRoute, routeFromState, resolveView, formatPath, LEGAL_VIEWS, AUTH_VIEWS, PARENT_HUB_PATH } from './lib/routes';
@@ -1689,6 +1690,14 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
   // student actually has.
   const [portSnapshot,   setPortSnapshot]   = useState(null);
   const [portSnapLoading,setPortSnapLoading]= useState(false);
+  // Mirrors of the two "have we loaded this yet" flags, for the remote-change listener below.
+  // It has to know whether there is a cached fetch worth redoing without taking either value as
+  // a dependency — a listener that re-registers every time the thing it watches changes is the
+  // usual way an event handler ends up attached three times.
+  const portSnapshotRef = useRef(null);
+  const portLoadedRef   = useRef(false);
+  portSnapshotRef.current = portSnapshot;
+  portLoadedRef.current   = portLoaded;
   const [catPerf,  setCatPerf_] = useState({});
   const [achiev,   setAchiev_]  = useState(new Set());
   // The substance milestone earned most recently in THIS session, which is what the dashboard's
@@ -2621,6 +2630,11 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
       DB.setSyncDirtyListener(ProgressSync.scheduleSyncPush);
       DB.setSyncEnabled(true);
       ProgressSync.installLifecycleFlush();
+      // Started here rather than earlier for the same reason as the line above: the poller's
+      // first job is to compare the server's rev against this device's base, and that base only
+      // exists once the initial pull above has settled. Started before it, the very first poll
+      // would see a null base, learn nothing, and back off.
+      startLiveSync();
       // Flushes anything the student tracked in a previous session that never reached the server
       // (tracked offline, or while signed out), and re-flushes on reconnect/refocus from here on.
       installTrackQueueLifecycle();
@@ -2630,6 +2644,10 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
       setDbReady(true);
     }
     init();
+    // The poller is module-level state, so it outlives this component unless it is told not to.
+    // AuthGate unmounts App on sign-out and remounts it on the next sign-in, which is exactly the
+    // boundary where one account's version must not be carried into the next.
+    return ()=>stopLiveSync();
     // Deliberately mount-only: `account` is read for its value at the moment this device's
     // local profile is loaded (to detect a different account signing in on this device), not
     // watched for changes — AuthGate remounts App fresh on every sign-in, so this always sees
@@ -2702,6 +2720,34 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
     catch(e){ console.error('Portfolio snapshot error:',e); }
     finally{ setPortSnapLoading(false); }
   },[]);
+  // Rows written on another device (a service log added on a phone, a college marked applied on
+  // a laptop) reach this snapshot no other way: it is fetched once per session and cached, and
+  // nothing in the fetch can tell that the rows underneath it have moved. liveSync's poller
+  // supplies exactly that signal — see src/lib/liveSync.js.
+  //
+  // Only refetched when the snapshot is already loaded: a tab sitting on the SAT tab has never
+  // built one, and pulling the whole Portfolio into a tab that is not showing it is work nobody
+  // asked for. The tab effect below fetches it on arrival, which by then is fresh anyway.
+  useEffect(()=>{
+    let timer=null;
+    const onRemoteData=()=>{
+      // Debounced because one edit on another device is often several row writes, and each one
+      // bumps the version this fires from.
+      clearTimeout(timer);
+      timer=setTimeout(()=>{
+        if(portSnapshotRef.current) refreshPortSnapshot();
+        // The activity/award/GPA lists predate the snapshot and are fetched separately, so they
+        // go stale independently of it and have to be told separately too.
+        if(portLoadedRef.current){
+          Promise.all([listItems('activities'),listItems('awards'),listItems('gpa_entries')])
+            .then(([a,w,g])=>{setPortActivities(a||[]);setPortAwards(w||[]);setPortGpa(g||[]);})
+            .catch(e=>console.error('Portfolio refresh error:',e));
+        }
+      },800);
+    };
+    window.addEventListener(REMOTE_DATA_EVENT,onRemoteData);
+    return()=>{clearTimeout(timer);window.removeEventListener(REMOTE_DATA_EVENT,onRemoteData);};
+  },[refreshPortSnapshot]);
   // Home is in this list because the MedEx Score lives there and is computed from these rows
   // (see the MEDEX SCORE block below). Fetching only on the Portfolio tab meant a student who
   // opened the app to their dashboard and never navigated saw a skeleton where their score
@@ -3991,6 +4037,8 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
     try{ await ProgressSync.flushNow(); }catch(err){ console.error('Pre-signout sync flush failed:',err); }
     DB.setSyncEnabled(false);
     ProgressSync.resetSyncStatus();
+    stopLiveSync();             // …and stop asking the server about an account nobody is signed
+                                // into any more, before the token this poll would use is cleared
     PlanStore.resetPlanStore(); // drop the previous account's plan-push state with everything else
     resetIntakeCache();         // …and the Admissions Calculator's cached intake row, so a second
                                 // account on this browser never sees the first one's answers
@@ -10384,6 +10432,15 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
             {syncStatus.state==='error'&&<><CloudOff size={13} color={C.amber}/><span style={{fontSize:12,color:C.amber}} title={syncStatus.error||''}>Offline — your progress is safe on this device and will sync automatically when you reconnect.</span><button onClick={()=>{ProgressSync.retrySyncNow().catch(()=>{});}} style={{marginLeft:4,fontSize:11,fontWeight:700,color:C.blueL,background:'none',border:'none',cursor:'pointer',padding:0,textDecoration:'underline'}}>Retry now</button></>}
             {syncStatus.state==='idle'&&<><Cloud size={13} color={C.t3}/><span style={{fontSize:12,color:C.t3}}>Not synced yet</span></>}
           </div>
+          {/* Deliberately worded as checking, not as live or instant. This is a poll
+              (src/lib/liveSync.js): a few seconds while the tab is open, and nothing at all while
+              it is in the background. Promising a push socket we do not have would turn every
+              normal few-second gap into a bug the student thinks they are seeing. */}
+          <p style={{fontSize:11.5,color:C.t3,marginBottom:12,lineHeight:1.6}}>
+            While this tab is open, it checks every few seconds for changes you made on your other
+            devices and picks them up on its own. A tab left in the background catches up as soon
+            as you come back to it.
+          </p>
           <button style={{...btnG({fontSize:12,padding:'8px 16px'})}} onClick={async()=>{try{await ProgressSync.flushNow();}catch(err){console.error('Pre-signout sync flush failed:',err);}await AuthAPI.logout();window.location.reload();}}>Sign out</button>
         </div>
 

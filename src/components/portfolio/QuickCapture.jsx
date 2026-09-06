@@ -5,6 +5,7 @@ import { C, glass2, btn, btnSm, inp, R, CC, pill, tint } from '../../lib/theme';
 import { listItems, createItem, updateItem, deleteItem } from '../../lib/dataApi';
 import { SectionTitle } from '../ui/PanelHero';
 import Disclosure, { HelpNote } from '../ui/Disclosure';
+import useRemoteDataRefresh from '../../lib/useRemoteDataRefresh';
 import { extractFromNote } from '../../lib/studentIntel/extract';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -24,13 +25,16 @@ export default function QuickCapture({ accent = C.violet, isMobile = false, defa
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `quiet` keeps a refresh triggered by another device from swapping the visible notes for a
+  // loading line, or from raising a toast about a fetch the student never initiated.
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     try { setNotes(await listItems('quick_notes')); }
-    catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
+    catch (err) { if (!quiet) toast.error(err.message); }
+    finally { if (!quiet) setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  useRemoteDataRefresh(useCallback(() => load({ quiet: true }), [load]));
 
   async function save() {
     const text = draft.trim();

@@ -90,6 +90,12 @@ async function req(path, options = {}) {
 // first pull of a session and is accepted unconditionally.
 let baseRev = null;
 
+// Read-only view of that rev, for src/lib/liveSync.js's poller. It compares the server's
+// current rev against this one to decide whether another device has written since — a
+// question only this module knows the answer to, and one that must not be answered by a
+// second copy of `baseRev` kept somewhere else and drifting out of step with the real one.
+export function getBaseRev() { return baseRev; }
+
 // Fingerprint of the last snapshot the server accepted from this device. A push
 // whose snapshot is byte-identical to that one, carrying no counter delta, has
 // nothing to say and is skipped entirely.
