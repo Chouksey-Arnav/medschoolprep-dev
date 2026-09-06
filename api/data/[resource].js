@@ -56,6 +56,40 @@ export const WRITABLE = {
   // essay drafts — stripDrafts() in src/lib/ivy/serialize.js is what enforces that, before the
   // payload ever reaches this endpoint.
   narrative_runs: ['ran_at', 'grade_level', 'tier', 'spike_index', 'coherence', 'portfolio_balance', 'project_viability', 'result'],
+
+  // The durable student-intelligence layer (supabase/migrations/0026_student_intelligence.sql).
+  // Singletons (school_context, constraints_profile) follow the admission_intake convention: one
+  // row per user, client treats GET as list -> first row, POST to create if none, PATCH by id to
+  // update. Every table carries `source` (provenance) as a writable field except where noted.
+  school_context: ['graduation_year', 'school_name', 'school_type', 'rigor_available', 'current_courses', 'workload_notes', 'source'],
+  // `location_consent`, `zip_code` and `state_code` are writable so the Opportunities tab's local-
+  // matching toggle (src/components/portfolio/OpportunitiesPanel.jsx) can set and revoke consent
+  // — but nothing outside that toggle should read zip/state without checking `location_consent`
+  // is true first (see src/lib/studentIntel/context.js).
+  constraints_profile: ['time_availability', 'transportation_limits', 'cost_sensitivity', 'accessibility_notes', 'family_constraints', 'zip_code', 'state_code', 'location_consent', 'location_consent_at', 'location_consent_revoked_at', 'source'],
+  // `raw_text` is deliberately NOT patchable — see IMMUTABLE_ON_PATCH below. It is writable on
+  // create (a student must be able to type it in the first place), which is why it stays in this
+  // list rather than being split out entirely.
+  quick_notes: ['raw_text', 'category', 'extracted', 'extraction_status', 'source'],
+  interest_history: ['interest', 'category', 'status', 'note', 'occurred_at', 'source'],
+  // `source` is deliberately absent: every service_logs row is self-reported by construction (the
+  // column's own check constraint forbids 'external_verified'), so there is nothing for a client
+  // to choose and no reason to let it set the one value the table already defaults to and means.
+  service_logs: ['entry_date', 'organization', 'cause_area', 'hours', 'role', 'description', 'impact_note', 'reflection', 'supporting_details'],
+  competitions: ['title', 'level', 'category', 'result', 'placement', 'occurred_on', 'description', 'source'],
+  reflections_log: ['entry_date', 'motivation', 'confidence', 'stress', 'work_style', 'barriers', 'raw_text', 'source'],
+  checkins: ['week_key', 'raw_text', 'changes', 'source'],
+  recommendation_feedback: ['item_label', 'item_ref', 'status', 'note', 'source'],
+  activity_role_history: ['activity_id', 'role', 'started_at', 'ended_at', 'outcome', 'source'],
+};
+
+// Columns a client may set on CREATE but may never change afterward via PATCH — narrower than
+// APPEND_ONLY (which blocks editing the row at all). `quick_notes.raw_text` is the one case in the
+// app where the requirement is "the student's original wording is never overwritten" while every
+// OTHER field on the same row (category, the AI-extracted structure, extraction_status) stays
+// fully editable — APPEND_ONLY couldn't express that, so this is its own small map.
+const IMMUTABLE_ON_PATCH = {
+  quick_notes: ['raw_text'],
 };
 
 // Every readable resource must also declare what a client may write to it. This used to be an
@@ -94,6 +128,7 @@ const MISCONFIGURED_SET = new Set(MISCONFIGURED);
 export const TOUCHES_UPDATED_AT = new Set([
   'colleges', 'essays', 'research_experience', 'skills_certifications', 'clinical_hours', 'recommenders',
   'admission_intake', 'credential_suggestions', 'reflection_entries', 'narrative_profile',
+  'school_context', 'constraints_profile', 'quick_notes', 'service_logs', 'competitions', 'recommendation_feedback',
 ]);
 
 // Resources a client may create and delete but never edit. A MedEx seal is a record of what a
@@ -200,6 +235,10 @@ export default async function handler(req, res) {
       const id = firstValue(body?.id);
       if (!id) return res.status(400).json({ error: 'Missing id.' });
       const updates = pick(body, WRITABLE[resource]);
+      // Strip any column this resource marks immutable-on-PATCH (see IMMUTABLE_ON_PATCH above) —
+      // silently, rather than rejecting the request, since a client sending the unchanged raw_text
+      // back alongside a real edit to another field is the common case, not an attack.
+      for (const col of (IMMUTABLE_ON_PATCH[resource] || [])) delete updates[col];
       if (!(await assertOwnedForeignKeys(supabase, resource, updates, user.id))) {
         return res.status(403).json({ error: 'Referenced record not found.' });
       }

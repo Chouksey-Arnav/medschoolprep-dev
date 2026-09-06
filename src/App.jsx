@@ -5380,6 +5380,22 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
         // being answered, this is what suspends the demanding-mentor stance and
         // replaces it with acknowledge-first — see src/lib/safety/prompts.js.
         safetyBlock:safetyTierRef.current?.block||'',
+        // Student-intelligence digest (src/lib/studentIntel/context.js) — reads off the same
+        // portSnapshot the Portfolio/Home tabs already fetch (src/lib/portfolioData.js), so this
+        // adds no extra request. Null until portSnapshot has loaded once, which is the correct
+        // "nothing to add yet" state rather than a fetch this call site needs to own.
+        studentIntel:portSnapshot?{
+          schoolContext:portSnapshot.schoolContext?.[0]||null,
+          constraints:portSnapshot.constraintsProfile?.[0]||null,
+          quickNotes:portSnapshot.quickNotes||[],
+          interestHistory:portSnapshot.interestHistory||[],
+          serviceLogs:portSnapshot.serviceLogs||[],
+          competitions:portSnapshot.competitions||[],
+          reflectionsLog:portSnapshot.reflectionsLog||[],
+          checkins:portSnapshot.checkins||[],
+          recommendationFeedback:portSnapshot.recommendationFeedback||[],
+          gradeLabel,
+        }:null,
       });
       const lastUser=[...history].reverse().find(m=>m.role==='user');
       const mode=modeById(coachMode);

@@ -30,6 +30,10 @@ import { buildPersonalBriefBlock } from './personalBrief';
 import { MEDICAL_SCOPE_BOUNDARY } from './safety/prompts';
 import { parseScholarshipNotes } from './scholarshipNotes';
 import { analyzeAcademics, gpaBand, gpaPercentileContext } from './academicIntel';
+// The durable student-intelligence layer's context-retrieval function (see its own header for
+// the full "why" — in short: pulls only what's relevant to THIS surface out of the new tables in
+// supabase/migrations/0026_student_intelligence.sql, never the whole history).
+import { buildStudentIntelBlock } from './studentIntel/context';
 
 // ── The two-source knowledge contract ────────────────────────────────────────
 // Every Medabrain surface shares this block, and it exists because the original
@@ -406,6 +410,13 @@ export function buildCoachSystemPrompt({
   // models weight late instructions more heavily, and "suspend the demanding-
   // mentor stance" has to actually beat the demanding-mentor stance.
   safetyBlock = '',
+  // ── Student-intelligence digest (src/lib/studentIntel/context.js) ─────────
+  // Raw rows from the new tables (school_context, constraints_profile, quick_notes,
+  // interest_history, service_logs, competitions, reflections_log, checkins,
+  // recommendation_feedback) — buildStudentIntelBlock() below turns them into a compact,
+  // task-scoped block instead of dumping the whole history. Optional and additive: a caller
+  // that doesn't pass it gets exactly the prompt this function produced before it existed.
+  studentIntel = null,
 } = {}) {
   const base = `You are Medabrain, the AI coach inside MedSchoolPrep, a prep platform built specifically for high school students in grades 9-12 who are interested in medicine or a health career — every student you talk to is roughly 14-18 years old, preparing for undergraduate admissions with an eye toward a future health-science major, not currently in or applying to medical/graduate school. Never bring up the MCAT, clinical rotations, or clinical-style interview formats (MMI, CASPer) unless the student explicitly asks about their long-term future — and even then, frame it as years-away context, not something to act on now.
 
@@ -524,6 +535,7 @@ You're talking with ${user?.name || 'a student'}${gradeLabel ? `, a ${gradeLabel
   return base + buildPersonalBriefBlock(user) + onboardingNote + liveNote + recentActivityNote
     + (deepContext || '')
     + timelineNote + roadmapNote + planNote + paceNote + levelNote + portfolioBrainNote
+    + (studentIntel ? buildStudentIntelBlock(studentIntel, 'general') : '')
     + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + tail
     + (modeBlock ? `\n${modeBlock}` : '')
     + (safetyBlock || '');
@@ -563,6 +575,9 @@ export function buildPortfolioSystemPrompt({
   // must reach every conversational surface: a student discloses wherever they
   // happen to be, not on the surface we expected.
   safetyBlock = '',
+  // See buildCoachSystemPrompt's `studentIntel` — same digest, rendered here with taskType
+  // 'roadmap' (this specialist is exactly where opportunity/service/roadmap questions land).
+  studentIntel = null,
 } = {}) {
   const base = `You are Medabrain, the Portfolio Intelligence specialist inside MedSchoolPrep — the same coaching mind as the app's head Medabrain coach, specialized on ${user?.name || 'this student'}'s undergraduate application: their college list, essays, deadlines, financial aid/scholarships, activities & resume, research, skills/certifications, clinical hours, recommenders, test scores, awards, and GPA. You go deeper here than the head coach can because you're handed the student's full tracked data below, not just summary counts.
 
@@ -725,7 +740,9 @@ Questions that stray outside the application (a study-plan question, a science q
 
 You are the one reader who will tell them the truth about this application before an admissions officer does. A thin activities list is thin; a college list with six reaches and no safety is a bad list; an essay draft that says nothing is a draft that says nothing. Say it, say why it costs them, and say what to do about it — do not soften a real gap into "you're off to a good start."${PERSONA_GUARDRAIL}${MEDABRAIN_ACTION_PROTOCOL}`;
 
-  return base + buildPersonalBriefBlock(user) + dataBlock + timelineBlock + roadmapBlock + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
+  return base + buildPersonalBriefBlock(user) + dataBlock + timelineBlock + roadmapBlock
+    + (studentIntel ? buildStudentIntelBlock(studentIntel, 'roadmap') : '')
+    + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
 }
 
 // ── Medabrain — Prep (pathway/lesson) system prompt ──────────────────────────

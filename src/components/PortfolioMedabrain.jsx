@@ -115,6 +115,20 @@ export default function PortfolioMedabrain({ user, pathwayLabel, gradeLabel, acc
         awards: portfolioData?.awards || [], gpaEntries: portfolioData?.gpaEntries || [],
         recentActivitySummary, timelineSummary, roadmapSummary,
         safetyBlock: safety.block,
+        // The student-intelligence digest — reads straight off the same shared snapshot this
+        // panel already receives, so this costs no extra request. See src/lib/studentIntel/context.js.
+        studentIntel: {
+          schoolContext: portfolioData?.schoolContext?.[0] || null,
+          constraints: portfolioData?.constraintsProfile?.[0] || null,
+          quickNotes: portfolioData?.quickNotes || [],
+          interestHistory: portfolioData?.interestHistory || [],
+          serviceLogs: portfolioData?.serviceLogs || [],
+          competitions: portfolioData?.competitions || [],
+          reflectionsLog: portfolioData?.reflectionsLog || [],
+          checkins: portfolioData?.checkins || [],
+          recommendationFeedback: portfolioData?.recommendationFeedback || [],
+          gradeLabel,
+        },
       });
       const res = await fetch('/api/groq', {
         method: 'POST',
