@@ -129,7 +129,15 @@ import { bandFor, bandOfGrade, confirmationStamp, needsGradYearConfirmation, gra
 import { landingFor, flowForBand, shouldShowReturnScreen, PATHWAY_SKIP_LABEL, DIAGNOSTIC_REOFFER, shouldReofferDiagnostic } from './lib/onboardingFlow';
 import GradYearCheckIn from './components/GradYearCheckIn';
 import ReturningBreakScreen from './components/ReturningBreakScreen';
-import { summarizeRoadmapForPrompt } from './lib/roadmap/model';
+import { summarizeRoadmapForPrompt, addStudentItem } from './lib/roadmap/model';
+// The opportunity-intelligence layer (src/lib/opportunity/). Imported here for the two things
+// only App can do: hand the Opportunities tab a way to write into the roadmap the student
+// committed to, and build the dashboard's summary from the SAME ranking the tab renders, so the
+// home card and the tab can never disagree about what this student should be doing.
+import { buildRecordPool } from './lib/opportunity/adapt';
+import { buildOpportunityContext } from './lib/opportunity/context';
+import { rankOpportunities } from './lib/opportunity/ranking';
+import { dashboardSummary, opportunityIntelBlock } from './lib/opportunity/insights';
 import { setAiLane, aiLane } from './lib/aiLane';
 // The Common App mirror, split out of the first-load bundle for the same reason the foundations
 // tools and the narrative engine are (see the React.lazy notes above). It pulls the whole
@@ -3254,6 +3262,23 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
   // many applications they have started and not sent. A card that says "your
   // top three picks" is a menu. A card that says "Rockefeller closes in 41 days
   // and you have two half-written applications" is a reason to open the tab.
+  // ── The student-intelligence rows, in one place ───────────────────────────
+  // Read off the portfolio snapshot the Portfolio and Home tabs already fetch, so this adds no
+  // request. Hoisted out of the coach's prompt builder because the opportunity layer needs the
+  // same rows and two copies would drift — the copy that fell behind would be the one telling a
+  // student to do something they already said they could not afford.
+  const studentIntelRows=useMemo(()=>(portSnapshot?{
+    schoolContext:portSnapshot.schoolContext?.[0]||null,
+    constraints:portSnapshot.constraintsProfile?.[0]||null,
+    quickNotes:portSnapshot.quickNotes||[],
+    interestHistory:portSnapshot.interestHistory||[],
+    serviceLogs:portSnapshot.serviceLogs||[],
+    competitions:portSnapshot.competitions||[],
+    reflectionsLog:portSnapshot.reflectionsLog||[],
+    checkins:portSnapshot.checkins||[],
+    recommendationFeedback:portSnapshot.recommendationFeedback||[],
+  }:null),[portSnapshot]);
+
   const opportunityPreview = useMemo(()=>{
     const prefs = readPrefs(user);
     const profile = buildMatchProfile({ user, snapshot:portSnapshot, pathwayKey:eSpec, prefs });
@@ -3262,13 +3287,46 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
       limit:1, freeOnly: prefs.costStance==='free_only', state: prefs.homeState,
     });
     const inProgress = Object.values(prefs.stages||{}).filter(s=>ACTIVE_STAGES.includes(s)).length;
+    // ── The full ranking, for the home card and for Medabrain ───────────────
+    // Deliberately the same call the Opportunities tab makes, over the same catalogs, so the
+    // number on the home card is the number in the tab. Discovered records are NOT included
+    // here: they live behind a per-account fetch the tab owns, and a dashboard that fired that
+    // request on every render would spend a round-trip on a card most students scroll past.
+    const ctx = buildOpportunityContext({
+      user, snapshot:portSnapshot, pathwayKey:eSpec,
+      colleges:portSnapshot?.colleges||[], roadmap:user?.roadmap||null,
+      deadlines:portSnapshot?.deadlines||[], intel:studentIntelRows,
+    });
+    const ranked = rankOpportunities({
+      records: buildRecordPool({ opportunities:OPPORTUNITIES, programs:PROGRAMS }),
+      ctx,
+    });
     return {
       profile,
+      ctx,
+      ranked,
+      summary: dashboardSummary(ranked, ctx),
       matches: matchOpportunities({ opportunities:OPPORTUNITIES, profile, count:3 }),
       next: next || null,
       inProgress,
     };
-  },[user,portSnapshot,eSpec]);
+  },[user,portSnapshot,eSpec,studentIntelRows]);
+
+  /**
+   * Put an opportunity on the student's roadmap.
+   *
+   * Handed down to the Opportunities tab, which builds the item (roadmapItemFor in
+   * src/lib/opportunity/insights.js) but has no business writing to the user record itself.
+   * The date is whatever the STUDENT supplied and is usually null — addStudentItem's
+   * `needsStudentDate` then keeps the roadmap asking for it, which is the honest behavior for a
+   * program whose deadline we have as an approximate month or as prose.
+   */
+  const addOpportunityToRoadmap = useCallback((item)=>{
+    if(!item?.title) return;
+    const base = user?.roadmap;
+    if(!base){ toast('Build your roadmap first (Roadmap tab) and this will drop straight into it.',{icon:'🗺️'}); return; }
+    saveUser({ ...user, roadmap: addStudentItem(base, item) });
+  },[user,saveUser]);
   // accentText, not the raw brand hex: a pathway's accent is fixed identity
   // (constants.js `physician: '#2d7fff'`), tuned as a fill, and this same value
   // is used as a TEXT color for unit kickers, stat numbers and taglines all
@@ -5437,19 +5495,12 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
         // portSnapshot the Portfolio/Home tabs already fetch (src/lib/portfolioData.js), so this
         // adds no extra request. Null until portSnapshot has loaded once, which is the correct
         // "nothing to add yet" state rather than a fetch this call site needs to own.
-        studentIntel:portSnapshot?{
-          schoolContext:portSnapshot.schoolContext?.[0]||null,
-          constraints:portSnapshot.constraintsProfile?.[0]||null,
-          quickNotes:portSnapshot.quickNotes||[],
-          interestHistory:portSnapshot.interestHistory||[],
-          serviceLogs:portSnapshot.serviceLogs||[],
-          competitions:portSnapshot.competitions||[],
-          reflectionsLog:portSnapshot.reflectionsLog||[],
-          checkins:portSnapshot.checkins||[],
-          recommendationFeedback:portSnapshot.recommendationFeedback||[],
-          gradeLabel,
-        }:null,
-      });
+        studentIntel:studentIntelRows?{...studentIntelRows,gradeLabel}:null,
+      })
+      // The opportunities the tab is showing them right now, appended to the coach's prompt so
+      // "what should I be doing" gets the same answer in chat as on the Opportunities tab. Empty
+      // string until the snapshot has loaded, which is the correct "nothing to add yet" state.
+      + opportunityIntelBlock(opportunityPreview.ranked, opportunityPreview.ctx);
       const lastUser=[...history].reverse().find(m=>m.role==='user');
       const mode=modeById(coachMode);
       // A mode may pin a tier (essay work and career questions want depth, a
@@ -8908,7 +8959,7 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
       {view:'recommenders',ic:UserCheck,label:'Recommenders',value:recommendersCount,sub:'people noted',col:C.fuchsia},
       {view:'interview',ic:Mic,label:'Interview prep',value:interviewCount,sub:'practice sessions',col:C.orange},
       {view:'tracked',ic:RadarIcon,label:'Tracked',value:trackedItems.length,sub:trackNeeds?`${trackNeeds} need you`:'all current',col:C.violet},
-      {view:'opportunities',ic:Trophy,label:'Opportunities',value:opportunityPreview.matches.length,sub:'matched to you',col:C.gold},
+      {view:'opportunities',ic:Trophy,label:'Opportunities',value:opportunityPreview.summary.count||opportunityPreview.matches.length,sub:'matched to you',col:C.gold},
     ];
     // The Overview's map has to obey the same ladder the sub-nav does, or it becomes a
     // back door around it: twelve tiles here would hand a day-one student the Financial
@@ -8944,7 +8995,7 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
       trackedCount:trackedItems.length, trackNeeds, trackFocus:trackReport.focus,
       goalsSet:weekGoalCount, activityCount:portActivities.length, clinicalHours:clinicalHoursTotal,
       collegeCount:appCounts.colleges, essayCount:appCounts.essays, recommenderCount:recommendersCount,
-      matchCount:opportunityPreview.matches.length,
+      matchCount:opportunityPreview.summary.count||opportunityPreview.matches.length,
       hasInterests:!opportunityPreview.profile.usingInferredThemes&&opportunityPreview.profile.activeThemeIds.length>0,
       gradeStage:user?.gradeStage||user?.gradeLevel||null,
     });
@@ -9029,9 +9080,13 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
             </div>
             <div style={{flex:1,minWidth:200}}>
               <div style={{fontSize:10,fontWeight:800,letterSpacing: 'calc(0.4px + var(--msp-letter-spacing))', color:accentText(C.gold)}}>Things to go do</div>
+              {/* The count is ADAPTIVE — see capacityFor() in src/lib/opportunity/ranking.js. This
+                  card used to promise "your top 3" to everyone; a student with two spare hours a
+                  week and three deadlines this month is shown fewer, and the card says the real
+                  number rather than a fixed one. */}
               <div style={{fontSize:13,fontWeight:700,color:C.t1,marginTop:4,fontFamily:C.FD}}>
-                {opportunityPreview.matches.length
-                  ?`Your top ${opportunityPreview.matches.length} picks out of ${OPPORTUNITIES.length} real programs`
+                {opportunityPreview.summary.count
+                  ?opportunityPreview.summary.line
                   :`${OPPORTUNITIES.length} real programs — competitions, research, volunteering and summer programs`}
               </div>
               <div style={{fontSize:11.5,color:C.t3,marginTop:4}}>
@@ -9041,7 +9096,7 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
               </div>
               {/* The two facts a dashboard is for. A deadline you are eligible
                   for is the only thing on this card that expires. */}
-              {(opportunityPreview.next||opportunityPreview.inProgress>0)&&(
+              {(opportunityPreview.next||opportunityPreview.inProgress>0||opportunityPreview.summary.needsVerification>0||opportunityPreview.summary.nextCycleCount>0)&&(
                 <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:8}}>
                   {opportunityPreview.next&&(
                     <span style={pill(tint(C.rose,0.14),accentText(C.rose),{fontSize:10.5,gap:4})}>
@@ -9052,6 +9107,18 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
                   {opportunityPreview.inProgress>0&&(
                     <span style={pill(tint(C.amber,0.14),accentText(C.amber),{fontSize:10.5})}>
                       {opportunityPreview.inProgress} application{opportunityPreview.inProgress===1?'':'s'} started, not sent
+                    </span>
+                  )}
+                  {/* Never a silent count. A record nobody has checked is labeled everywhere it
+                      appears, including here, so a student never acts on one thinking otherwise. */}
+                  {opportunityPreview.summary.needsVerification>0&&(
+                    <span style={pill(tint(C.violet,0.14),accentText(C.violet),{fontSize:10.5})}>
+                      {opportunityPreview.summary.needsVerification} still need verifying
+                    </span>
+                  )}
+                  {opportunityPreview.summary.nextCycleCount>0&&(
+                    <span style={pill(tint(C.blue,0.14),accentText(C.blue),{fontSize:10.5})}>
+                      {opportunityPreview.summary.nextCycleCount} to get ready for next cycle
                     </span>
                   )}
                 </div>
@@ -10832,7 +10899,9 @@ export default function App({ account, onAccountChange, onOpenLegal }) {
               trackedKeys={{activities:trackedActivityKeys,scholarships:trackedScholarshipKeys}}
               pendingKeys={{activities:pendingTracks.byResource.activities,scholarships:pendingTracks.byResource.scholarships}}
               pendingEntries={pendingTracks.entries} trackStatus={pendingTracks.status}
-              focus={focusFor('opportunity')}/> },
+              focus={focusFor('opportunity')}
+              roadmap={user?.roadmap||null} intel={studentIntelRows}
+              onAddToRoadmap={addOpportunityToRoadmap}/> },
           { id:'tracked', ic:RadarIcon, label:'What you\u2019re tracking', color:C.violet,
             blurb:'Every program you saved, with its deadline, its status and a daily read',
             render:()=><TrackedPanel snapshot={portSnapshot} loading={portSnapLoading} accent={portC.opportunities}

@@ -5,6 +5,12 @@ import { Brain, X, Send, Loader2, RotateCcw, Check, MapPin } from 'lucide-react'
 import { C, glass, tint } from '../lib/theme';
 import { listItems } from '../lib/dataApi';
 import { buildPortfolioSystemPrompt } from '../lib/studentProfile';
+import { buildRecordPool } from '../lib/opportunity/adapt';
+import { buildOpportunityContext } from '../lib/opportunity/context';
+import { rankOpportunities } from '../lib/opportunity/ranking';
+import { opportunityIntelBlock } from '../lib/opportunity/insights';
+import { OPPORTUNITIES } from '../data/opportunities';
+import { PROGRAMS } from '../data/opportunityPrograms';
 // The safety pass runs on every chat surface, not only the head coach — a student
 // in trouble does not pick the tab we thought of. See src/lib/safety/pass.js.
 import { runSafetyPass } from '../lib/safety/pass';
@@ -129,6 +135,14 @@ export default function PortfolioMedabrain({ user, pathwayLabel, gradeLabel, acc
           recommendationFeedback: portfolioData?.recommendationFeedback || [],
           gradeLabel,
         },
+        // The exact opportunity shortlist the Opportunities tab is showing them, ranked by the
+        // same call the tab makes (src/lib/opportunity/). This specialist gets asked "what should
+        // I apply to" more than any other surface in the app; without this block it would answer
+        // from the raw catalog while the tab next door answered from a ranking that already knows
+        // about their cost, distance and time constraints — two products disagreeing about one
+        // student. The block also carries the data states, so a lead the model names is described
+        // as a lead.
+        opportunityBlock: buildOpportunityIntel(user, portfolioData),
       });
       const res = await fetch('/api/groq', {
         method: 'POST',
@@ -358,4 +372,39 @@ export default function PortfolioMedabrain({ user, pathwayLabel, gradeLabel, acc
       </AnimatePresence>
     </>
   );
+}
+
+/**
+ * The opportunity shortlist as a prompt block, or '' when it cannot be built.
+ *
+ * Wrapped in try/catch and its own function rather than inlined at the call site for one reason:
+ * a throw here would cost the student their whole chat send, and a slightly less informed answer
+ * is strictly better than no answer. `user.specialty` is the same pathway key App.jsx reads as
+ * `eSpec` — the pathway currently in focus — so this specialist ranks against the same direction
+ * every other surface does.
+ */
+function buildOpportunityIntel(user, portfolioData) {
+  try {
+    const ctx = buildOpportunityContext({
+      user,
+      snapshot: portfolioData || null,
+      pathwayKey: user?.specialty || 'exploring',
+      colleges: portfolioData?.colleges || [],
+      roadmap: user?.roadmap || null,
+      deadlines: portfolioData?.deadlines || [],
+      intel: {
+        schoolContext: portfolioData?.schoolContext?.[0] || null,
+        constraints: portfolioData?.constraintsProfile?.[0] || null,
+        interestHistory: portfolioData?.interestHistory || [],
+        serviceLogs: portfolioData?.serviceLogs || [],
+        competitions: portfolioData?.competitions || [],
+        recommendationFeedback: portfolioData?.recommendationFeedback || [],
+      },
+    });
+    const ranked = rankOpportunities({
+      records: buildRecordPool({ opportunities: OPPORTUNITIES, programs: PROGRAMS }),
+      ctx,
+    });
+    return opportunityIntelBlock(ranked, ctx);
+  } catch { return ''; }
 }

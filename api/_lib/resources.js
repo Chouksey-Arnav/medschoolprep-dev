@@ -69,6 +69,12 @@ export const RESOURCES = [
   'checkins',
   'recommendation_feedback',
   'activity_role_history',
+  // The opportunity-intelligence layer (supabase/migrations/0028_opportunity_intelligence.sql).
+  // One row per program Medabrain proposed for this student and nobody has verified yet. Listed
+  // here like every other resource so a student's discovery inbox is exportable and deletable
+  // with their account — see api/data/[resource].js, whose WRITABLE list deliberately excludes
+  // `verified_at` so no student-facing write can mark a record verified.
+  'discovered_opportunities',
 ];
 
 /** Membership test for the CRUD endpoint's `[resource]` path segment. */

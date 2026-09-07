@@ -2,28 +2,38 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  Trophy, Sparkles, Loader2, SlidersHorizontal, Check, ChevronDown, ChevronUp,
+  Trophy, Sparkles, Loader2, SlidersHorizontal, Check, ChevronUp,
   RefreshCw, Compass, Wallet, Laptop, Target, Radar as RadarIcon, Library, Info, Wand2,
 } from 'lucide-react';
-import { C, glass, glass2, btn, btnSm, R, CC, pill, tint, onTint, accentText, CONTROL_TRANSITION } from '../../lib/theme';
+import { C, glass, glass2, btn, btnSm, R, CC, tint, onTint, accentText, CONTROL_TRANSITION } from '../../lib/theme';
 import PanelHero from '../ui/PanelHero';
 import SectionIntro from './SectionIntro';
 import TrackQueueNotice from '../ui/TrackQueueNotice';
-import TrackButton from '../ui/TrackButton';
 import OpportunitiesDatabase from '../OpportunitiesDatabase';
 import Disclosure, { HelpNote, HowItWorks } from '../ui/Disclosure';
-import { OPPORTUNITIES, OPPORTUNITY_TYPES } from '../../data/opportunities';
+import { OPPORTUNITIES } from '../../data/opportunities';
 import {
   INTEREST_THEMES, THEME_BY_ID, EFFORT_APPETITES, COST_STANCES, FORMAT_PREFS,
   buildMatchProfile, matchOpportunities, buildMatchPrompt, readPrefs, writePrefs, themeReach,
-  PIPELINE_STAGES, ACTIVE_STAGES, grantLocalMatchConsent, revokeLocalMatchConsent,
+  ACTIVE_STAGES, grantLocalMatchConsent, revokeLocalMatchConsent,
 } from '../../lib/opportunityMatch';
 import LocalMatchConsent from './LocalMatchConsent';
+// ── Why the feed is lazy and the panel is not ────────────────────────────────
+// The feed pulls the whole opportunity-intelligence layer AND its two heaviest leaves — the
+// discovery workflow and the discovered-record store — plus the card that renders twelve
+// dimensions per row. Statically imported it lands in the first-load bundle that
+// scripts/verifyPayload.mjs guards, paid by every student on every boot including the ones who
+// never open this tab. Behind React.lazy, Rollup gives it its own chunk, fetched the first time
+// somebody actually looks at their opportunities. (App.jsx's dashboard card still imports the
+// RANKING directly and always will — it renders on the home screen, so it cannot be deferred.)
+const OpportunityFeed = React.lazy(() => import('./OpportunityFeed'));
+import { buildOpportunityPrompt } from '../../lib/opportunity/insights';
+import { buildOpportunityContext } from '../../lib/opportunity/context';
 import ServiceLogPanel from './ServiceLogPanel';
 import QuickCapture from './QuickCapture';
 import WeeklyCheckin, { WeeklyCheckinHistory } from './WeeklyCheckin';
 import ProfileIntelPrompt from './ProfileIntelPrompt';
-import { trackTargetForOpportunity, resourceForOpportunity, catalogDedupeKey } from '../../lib/trackingCatalog';
+import { resourceForOpportunity, catalogDedupeKey } from '../../lib/trackingCatalog';
 import { TierLegend, DeadlineBoard, HosaTracker } from './ProgramTiers';
 import ProgramExplorer from './ProgramExplorer';
 import {
@@ -90,12 +100,14 @@ export default function OpportunitiesPanel({
   pathwayKey = null, pathwayLabel = 'pre-health', askMedabrain, isMobile = false,
   onTrack, trackedKeys, pendingKeys, pendingEntries = [], trackStatus = {}, onOpen,
   focus = null,
+  // The three inputs the opportunity-intelligence layer needs beyond the portfolio snapshot:
+  // the twelve-month plan the student committed to, the student-intelligence rows (school
+  // context, constraints, feedback history), and the roadmap's own "add this" callback.
+  // All optional — the feed degrades to a curated-catalog ranking without any of them.
+  roadmap = null, intel = null, onAddToRoadmap = null,
 }) {
   const prefs = useMemo(() => readPrefs(user), [user]);
   const [tuning, setTuning] = useState(false);
-  const [typeFilter, setTypeFilter] = useState('All');
-  const [expandedId, setExpandedId] = useState(null);
-  const [busyId, setBusyId] = useState(null);
   const [brief, setBrief] = useState(null); // { loading, content, error }
   const [briefNonce, setBriefNonce] = useState(0); // bumped by "Regenerate" to bypass the cache
   // Programs whose deadline is already in the student's Milestones, so the
@@ -121,8 +133,8 @@ export default function OpportunitiesPanel({
 
   const matches = useMemo(() => matchOpportunities({
     opportunities: OPPORTUNITIES, profile, count: MATCH_COUNT,
-    excludeIds: trackedOpportunityIds, typeFilter,
-  }), [profile, trackedOpportunityIds, typeFilter]);
+    excludeIds: trackedOpportunityIds,
+  }), [profile, trackedOpportunityIds]);
 
   // Interests the catalog barely covers. This is a curated ~220 programs, not an index of
   // everything: there are exactly two dental entries in it. Saying so is the difference between
@@ -169,25 +181,6 @@ export default function OpportunitiesPanel({
   function acceptInferred() {
     savePrefs({ themeIds: profile.activeThemeIds });
     toast.success('Locked in — you can add or drop any of these anytime.', { icon: <Sparkles size={16} /> });
-  }
-
-  async function handleTrack(o) {
-    setBusyId(o.id);
-    try {
-      const { resource, row } = trackTargetForOpportunity(o, { sortOrder: profile.totalActivities });
-      const res = await onTrack(resource, row, { dedupeKey: catalogDedupeKey(resource, o), label: o.name });
-      if (res?.status === 'duplicate') toast(`${o.name.slice(0, 40)} is already tracked`, { icon: '✓' });
-      else if (res?.status === 'queued') {
-        toast(res.reason === 'auth'
-          ? `${o.name.slice(0, 40)} is saved on this device — sign in to finish saving it to your account.`
-          : `${o.name.slice(0, 40)} is saved on this device and will finish saving when you're back online.`,
-        { icon: '📥', duration: 6000 });
-      } else {
-        showMedabrainToast('opportunity_added', { name: o.name, type: o.type });
-        toast.success(resource === 'scholarships' ? `Added to your scholarship tracker: ${o.name.slice(0, 40)}` : `Added: ${o.name.slice(0, 40)}`);
-      }
-    } catch (err) { toast.error(err.message); }
-    finally { setBusyId(null); }
   }
 
   // ── Eligibility + deadlines ───────────────────────────────────────────────
@@ -264,14 +257,6 @@ export default function OpportunitiesPanel({
     () => Object.values(stages).filter((s) => s === 'submitted' || s === 'accepted').length,
     [stages],
   );
-
-  const stateOf = (o) => {
-    const resource = resourceForOpportunity(o);
-    const key = catalogDedupeKey(resource, o);
-    if (trackedKeys?.[resource]?.has(key)) return 'tracked';
-    if (pendingKeys?.[resource]?.has(key)) return 'pending';
-    return 'idle';
-  };
 
   const pickedCount = prefs.themeIds.length;
 
@@ -475,24 +460,11 @@ export default function OpportunitiesPanel({
             </div>
           } />
 
-        <div style={CC({ gap: 8 })}>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: 10.5, color: C.t3, marginRight: 4 }}>Show:</span>
-            {OPPORTUNITY_TYPES.map((t) => (
-              <button key={t} onClick={() => setTypeFilter(t)}
-                style={pill(typeFilter === t ? tint(accent, 0.22) : C.surf2, typeFilter === t ? onTint(accent) : C.t3,
-                  { cursor: 'pointer', border: `1px solid ${typeFilter === t ? tint(accent, 0.4) : C.b1}`, fontWeight: typeFilter === t ? 700 : 500, fontSize: 11 })}>
-                {t === 'All' ? 'Everything' : t}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {thinThemes.length > 0 && (
           <div style={{ ...glass2({ padding: 12 }), display: 'flex', gap: 8, alignItems: 'flex-start', border: `1px solid ${tint(C.amber, 0.24)}` }}>
             <Info size={12} color={C.amberL} style={{ marginTop: 4, flexShrink: 0 }} />
             <span style={{ fontSize: 11.5, color: C.t2, lineHeight: 1.6 }}>
-              Heads up: we only have {thinThemes.map((t) => `${t.reach} ${THEME_BY_ID[t.id]?.label.toLowerCase()} program${t.reach === 1 ? '' : 's'}`).join(' and ')} in our catalog so far. Those come first — the rest below are the next-closest fit for you.
+              Heads up: we only have {thinThemes.map((t) => `${t.reach} ${THEME_BY_ID[t.id]?.label.toLowerCase()} program${t.reach === 1 ? '' : 's'}`).join(' and ')} in our curated catalog so far. Those come first, and Medabrain can go looking beyond it — see “Look for something we do not have” below.
             </span>
           </div>
         )}
@@ -525,31 +497,37 @@ export default function OpportunitiesPanel({
           </div>
         )}
 
-        {loading && !matches.length ? (
+        {/* ── The adaptive feed ────────────────────────────────────────────
+            This replaced a fixed grid of six cards. The grid was the same six
+            for a student with ten spare hours and a student with two, and it
+            answered "does this match your interests" and nothing else — not
+            cost, not distance, not whether they had already told us no, not
+            whether they were even eligible, and not what a realistic result
+            would be. See src/lib/opportunity/ for the model behind it. */}
+        {loading && !snapshot ? (
           <div style={{ ...glass2({ padding: 20, textAlign: 'center' }) }}>
             <Loader2 size={18} className="spin" color={C.t3} />
             <div style={{ fontSize: 12.5, color: C.t3, marginTop: 8 }}>Reading your portfolio…</div>
           </div>
-        ) : matches.length ? (
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill,minmax(320px,1fr))', gap: 12 }}>
-            {matches.map((m) => (
-              <MatchCard key={m.item.id} match={m} accent={accent}
-                expanded={expandedId === m.item.id} onToggle={() => setExpandedId(expandedId === m.item.id ? null : m.item.id)}
-                state={stateOf(m.item)} busy={busyId === m.item.id} onTrack={() => handleTrack(m.item)} />
-            ))}
-          </div>
         ) : (
-          <div style={{ ...glass2({ padding: 20, textAlign: 'center' }) }}>
-            <Compass size={20} color={C.t3} style={{ marginBottom: 8 }} />
-            <div style={{ fontSize: 12.5, color: C.t2, lineHeight: 1.55 }}>
-              {typeFilter !== 'All'
-                ? `Nothing in "${typeFilter}" clears your current filters — try another type, or loosen cost/format under Tune.`
-                : 'Your filters rule out every program in the catalog. Loosen cost, format, or grade under Tune to see matches again.'}
+          <React.Suspense fallback={(
+            <div style={{ ...glass2({ padding: 20, textAlign: 'center' }) }}>
+              <Loader2 size={18} className="spin" color={C.t3} />
+              <div style={{ fontSize: 12.5, color: C.t3, marginTop: 8 }}>Ranking your opportunities…</div>
             </div>
-            <button onClick={() => setTuning(true)} style={{ ...btnSm(tint(C.violet, 0.16), { color: onTint(C.violet), fontSize: 11.5, marginTop: 8 }) }}>
-              <SlidersHorizontal size={11} />Open tuning
-            </button>
-          </div>
+          )}>
+          <OpportunityFeed
+            accent={accent} user={user} snapshot={snapshot} pathwayKey={pathwayKey} isMobile={isMobile}
+            colleges={snapshot?.colleges || []} roadmap={roadmap} deadlines={snapshot?.deadlines || []}
+            intel={intel}
+            askMedabrain={askMedabrain ? (scored) => askMedabrain(buildOpportunityPrompt(
+              { matches: [scored] },
+              buildOpportunityContext({ user, snapshot, pathwayKey, colleges: snapshot?.colleges || [], roadmap, deadlines: snapshot?.deadlines || [], intel }),
+              { question: `They asked for help with ${scored.record.name}. Tell them, specifically, what to do next about it.` },
+            ), 480) : null}
+            onAddToRoadmap={onAddToRoadmap}
+          />
+          </React.Suspense>
         )}
       </section>
 
@@ -626,81 +604,6 @@ export default function OpportunitiesPanel({
 // immediately underneath by the reason chips, and expanding shows the same
 // eligibility/cost/format prose the catalog carries. A percentage with no
 // visible reasons is a horoscope — these two always ship together.
-function MatchCard({ match, accent, expanded, onToggle, state, busy, onTrack }) {
-  const o = match.item;
-  const mc = matchColor(match.match);
-  const ec = effortColor(o.effort);
-  return (
-    <motion.div whileHover={{ y: -2 }} transition={{ type: 'spring', stiffness: 380, damping: 26 }}
-      style={{
-        ...glass({ padding: 0, overflow: 'hidden' }),
-        border: `1px solid ${tint(mc, 0.26)}`,
-        background: `linear-gradient(150deg,${tint(mc, 0.07)},rgba(255,255,255,0.02) 55%)`,
-        display: 'flex', flexDirection: 'column',
-      }}>
-      <div style={{ height: 3, background: `linear-gradient(90deg,${mc},${tint(mc, 0)})` }} />
-      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-        <div style={R({ gap: 12, alignItems: 'flex-start' })}>
-          <MatchDial pct={match.match} color={mc} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 800, color: C.t1, fontFamily: C.FD, lineHeight: 1.35 }}>{o.name}</div>
-            <div style={{ fontSize: 10.5, color: C.t3, marginTop: 4 }}>{o.org}</div>
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
-              <span style={pill(`${ec}18`, ec, { fontSize: 9 })}>{o.effort}</span>
-              <span style={pill('rgba(255,255,255,0.06)', C.t3, { fontSize: 9 })}>{o.type}</span>
-              <span style={pill('rgba(255,255,255,0.06)', C.t3, { fontSize: 9 })}>{o.level}</span>
-              {o.cost && <span style={pill(tint(C.green, 0.12), C.greenL, { fontSize: 9 })}>{o.cost}</span>}
-            </div>
-          </div>
-        </div>
-
-        <div style={CC({ gap: 4 })}>
-          {match.reasons.slice(0, 3).map((r, i) => {
-            const meta = reasonMeta(r.type);
-            return (
-              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <span style={{ ...pill(tint(meta.col, 0.14), meta.col, { fontSize: 8.5, flexShrink: 0, padding: '4px 8px', letterSpacing: 'calc(0.4px + var(--msp-letter-spacing))', fontWeight: 800 }) }}>{meta.label}</span>
-                <span style={{ fontSize: 11.5, color: C.t2, lineHeight: 1.5 }}>{r.text}</span>
-              </div>
-            );
-          })}
-          {!match.reasons.length && <div style={{ fontSize: 11.5, color: C.t2, lineHeight: 1.5 }}>{match.reason}</div>}
-        </div>
-
-        <AnimatePresence initial={false}>
-          {expanded && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden' }}>
-              <div style={{ paddingTop: 8, borderTop: `1px solid ${C.b1}`, fontSize: 11.5, color: C.t2, lineHeight: 1.55 }}>
-                <p style={{ margin: '0px 0px 8px' }}>{o.desc}</p>
-                <div style={{ color: C.t3 }}>
-                  <div><b style={{ color: C.t2 }}>Eligibility:</b> {o.eligibility}</div>
-                  {o.season && <div><b style={{ color: C.t2 }}>Runs:</b> {o.season}{o.format ? ` · ${o.format}` : ''}</div>}
-                  {o.grades && <div><b style={{ color: C.t2 }}>Typical grades:</b> {o.grades.join(', ')}</div>}
-                </div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
-                  {(o.tags || []).slice(0, 6).map((t) => <span key={t} style={pill('rgba(255,255,255,0.06)', C.t3, { fontSize: 9 })}>{t}</span>)}
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div style={R({ gap: 8, marginTop: 'auto', paddingTop: 4 })}>
-          <TrackButton state={state} busy={busy} accent={accent}
-            label={resourceForOpportunity(o) === 'scholarships' ? 'Track scholarship' : 'Add to Portfolio'}
-            trackedLabel="In your Portfolio" onClick={onTrack} />
-          <button onClick={onToggle} aria-expanded={expanded}
-            style={btnSm('transparent', { fontSize: 11, color: C.t3, marginLeft: 'auto', border: `1px solid ${C.b1}` })}>
-            {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}{expanded ? 'Less' : 'Details'}
-          </button>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-// The match percentage as a ring. Pure SVG — no chart library for one arc, and
-// it renders identically in every theme because it only uses tokens.
 function MatchDial({ pct, color, size = 46 }) {
   const stroke = 4;
   const r = (size - stroke) / 2;

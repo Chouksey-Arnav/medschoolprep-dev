@@ -52,7 +52,7 @@
     "audit:sat-resources": "node scripts/auditSatResources.mjs",
     "verify:sat-library": "node scripts/verifySatLibrary.mjs",
     "verify:goals": "node scripts/verifyWeeklyGoals.mjs",
-    "verify:opportunities": "node scripts/verifyOpportunities.mjs && node scripts/verifyOpportunityPrograms.mjs",
+    "verify:opportunities": "node scripts/verifyOpportunities.mjs && node scripts/verifyOpportunityPrograms.mjs && node scripts/verifyOpportunityIntelligence.mjs",
     "verify:timeline": "node scripts/verifyTimeline.mjs",
     "verify:grade-band": "node scripts/verifyGradeBand.mjs",
     "verify:resume": "node scripts/verifyResumeBuilder.mjs",

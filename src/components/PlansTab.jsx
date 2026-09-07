@@ -76,6 +76,14 @@ const PORTFOLIO_RESOURCE_MAP = {
   checkins: 'checkins',
   recommendation_feedback: 'recommendationFeedback',
   activity_role_history: 'activityRoleHistory',
+  // The student's own discovery inbox (supabase/migrations/0028_opportunity_intelligence.sql).
+  // The planner reads it for the same reason it reads recommendation_feedback: these are real
+  // leads this student went looking for, and a plan that cannot see them will schedule "research
+  // summer programs" while three named, unverified candidates sit unchecked in their tab. Every
+  // row is unverified by construction, so the only task the plan may build around one is a
+  // verification task — see buildPortfolioFactsText in src/lib/masterPlanGenerator.js, which
+  // states that rule to the model explicitly.
+  discovered_opportunities: 'discoveredOpportunities',
 };
 const PORTFOLIO_RESOURCES = Object.keys(PORTFOLIO_RESOURCE_MAP);
 

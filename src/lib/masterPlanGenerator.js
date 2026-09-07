@@ -54,6 +54,12 @@ import { aiLane } from './aiLane.js';
 // coach prompt and the Service panel all describe the same hours in the same terms — and so the
 // "self-reported, never verified" framing lives in exactly one place.
 import { serviceSummary } from './studentIntel/serviceAnalytics';
+import { buildRecordPool } from './opportunity/adapt.js';
+import { buildOpportunityContext } from './opportunity/context.js';
+import { rankOpportunities } from './opportunity/ranking.js';
+import { planTasksFor } from './opportunity/insights.js';
+import { OPPORTUNITIES } from '../data/opportunities.js';
+import { PROGRAMS } from '../data/opportunityPrograms.js';
 import { currentInterests, directionChanges, SUPPRESS_STATUSES } from './studentIntel/context';
 
 const labelOf = (opts, v) => opts.find(o => o.value === v)?.label || null;
@@ -230,6 +236,7 @@ const DEFAULT_PORTFOLIO = {
   collegeChecklist: [], admissionIntake: [],
   schoolContext: [], constraintsProfile: [], quickNotes: [], interestHistory: [], serviceLogs: [],
   competitions: [], checkins: [], recommendationFeedback: [], activityRoleHistory: [],
+  discoveredOpportunities: [],
 };
 const daysSince = (ts) => {
   if (!ts) return null;
@@ -240,7 +247,9 @@ const daysSince = (ts) => {
 const wordCount = (s) => String(s || '').trim().split(/\s+/).filter(Boolean).length;
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-function buildPortfolioFactsText(portfolio) {
+// `user` arrived with the opportunity shortlist below: ranking an opportunity needs the pathway,
+// grade and roadmap that live on the user record, none of which are in the portfolio snapshot.
+function buildPortfolioFactsText(portfolio, user = null) {
   if (!portfolio) return null;
   const p = { ...DEFAULT_PORTFOLIO, ...portfolio };
   const {
@@ -248,7 +257,7 @@ function buildPortfolioFactsText(portfolio) {
     research, skills, clinicalHours, recommenders, testScores, awards, gpaEntries, collegeChecklist,
     admissionIntake,
     schoolContext, constraintsProfile, quickNotes, interestHistory, serviceLogs,
-    competitions, checkins, recommendationFeedback, activityRoleHistory,
+    competitions, checkins, recommendationFeedback, activityRoleHistory, discoveredOpportunities,
   } = p;
   const today = todayStr();
   const lines = [];
@@ -401,6 +410,41 @@ function buildPortfolioFactsText(portfolio) {
   if (wantsHelp.length) {
     lines.push(`They explicitly asked for help with: ${wantsHelp.slice(0, 5).map(f => `"${f.item_label}"`).join('; ')} — these are the opportunities to build real tasks around.`);
   }
+
+  // ── The ranked opportunity shortlist ─────────────────────────────────────
+  // The plan generator used to see the student's REFUSALS but never their matches, so it knew
+  // what not to schedule and had nothing concrete to schedule instead — which is how a
+  // twelve-week plan ends up full of "research summer programs" as a weekly task. These are the
+  // exact opportunities the Opportunities tab is showing them, with the exact realistic outcomes,
+  // so the plan can build a week around one instead of around the idea of one.
+  //
+  // Wrapped in try/catch for the same reason PortfolioMedabrain wraps its copy: a plan generated
+  // without this section is a slightly less specific plan, and a throw here is no plan at all.
+  try {
+    const ctx = buildOpportunityContext({
+      user, snapshot: portfolio, pathwayKey: user?.specialty || 'exploring',
+      colleges, roadmap: user?.roadmap || null, deadlines,
+      intel: { schoolContext: schoolContext?.[0] || null, constraints: constraintsProfile?.[0] || null,
+        interestHistory, serviceLogs, competitions, recommendationFeedback },
+    });
+    const ranked = rankOpportunities({
+      // The student's own unverified discoveries are ranked alongside the curated catalogs, and
+      // arrive carrying the ai_discovered data state that makes them read as leads everywhere.
+      records: buildRecordPool({ opportunities: OPPORTUNITIES, programs: PROGRAMS, discovered: discoveredOpportunities }),
+      ctx,
+    });
+    const shortlist = ranked.matches.slice(0, 5);
+    if (shortlist.length) {
+      lines.push(`Opportunities currently matched to them (${ranked.capacity.count} shown in their tab, ${ranked.capacity.posture} list — schedule tasks against THESE by name rather than proposing generic "look for a program" work): ${shortlist.map(m => `"${m.record.name}" [${m.dataState.label}] — ${planTasksFor(m, ctx)[0] || 'read the official page'}`).join('; ')}.`);
+      const unverified = shortlist.filter(m => m.dataState.id === 'ai_discovered');
+      if (unverified.length) {
+        lines.push(`${unverified.length} of those are AI-discovered and unverified. Any task you build around one must be a VERIFICATION task first ("confirm it is real and open to you on the organization's own page"), never an application task — and never state a deadline for one.`);
+      }
+      if (ranked.nextCycle.length) {
+        lines.push(`${ranked.nextCycle.length} opportunity cycle(s) have already closed for this year but run again: ${ranked.nextCycle.slice(0, 3).map(m => `"${m.record.name}"`).join(', ')}. Schedule preparation, never an application, and only state timing that their own card states.`);
+      }
+    }
+  } catch { /* the digest is still complete without the shortlist */ }
 
   // Service hours. Self-reported throughout: the student typed these in, nobody checked them,
   // and the plan must never describe them as verified.
@@ -662,7 +706,7 @@ export function buildProfileFactsText(user, liveSignals = {}, portfolio = null, 
   const blocks = [];
   const perf = buildPerformanceFactsText(liveSignals);
   if (perf) blocks.push({ drop: 2, text: `\nHOW THEY ARE ACTUALLY PERFORMING RIGHT NOW (measured in-app, not self-reported):\n${perf}` });
-  const portfolioText = buildPortfolioFactsText(portfolio);
+  const portfolioText = buildPortfolioFactsText(portfolio, user);
   if (portfolioText) {
     blocks.push({ drop: 1, text: `\nTHEIR ENTIRE PORTFOLIO, READ ROW BY ROW (reference these by name in Portfolio-pillar tasks instead of generic busywork — an essay task should name the real essay and its word count, a deadline task should name the real deadline, a clinical task should name the real site):\n${portfolioText}` });
     const gapText = buildPortfolioGapText(portfolio, user);

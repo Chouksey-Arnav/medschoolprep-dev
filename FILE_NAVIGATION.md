@@ -19,6 +19,7 @@ When assigned a specific task, jump directly to the relevant files listed below:
 | **Four-Year Course Strategy** | `src/components/prep/FourYearMap.jsx`, `CoursePlannerPanel.jsx` | `src/lib/fourYearMap.js`, `coursePlanner.js` | `src/data/lessonContent/courseStrategy.js` | `scripts/verifyFourYearMap.mjs` |
 | **Common App Resume & Activities** | `src/components/ActivitiesResumePanel.jsx` | `src/lib/commonApp/activities.js`, `activityIntel.js` | `src/data/constants.js` | `scripts/verifyResumeBuilder.mjs` |
 | **Common App Mirror & Portfolio Sync** | `src/components/portfolio/CommonAppMirror.jsx`, `CommonAppMirrorBadge.jsx` | `src/lib/commonApp/sections.js`, `derive.js`, `sync.js`, `useCommonApp.js` | — (ledger rides the user record) | `scripts/verifyCommonApp.mjs` |
+| **Opportunity Intelligence** | `src/components/portfolio/OpportunityFeed.jsx`, `OpportunityCard.jsx` | `src/lib/opportunity/` (`ranking`, `schema`, `feedback`, `discovery`, `insights`) | `supabase/migrations/0028_opportunity_intelligence.sql` | `scripts/verifyOpportunityIntelligence.mjs` |
 | **Portfolio Milestones & Roadmaps** | `src/components/PortfolioMilestones.jsx`, `PlansTab.jsx` | `src/lib/roadmap/generator.js`, `timeline.js` | `supabase/migrations/0015_roadmaps.sql` | `scripts/verifyTimeline.mjs`, `verifyRoadmap.mjs` |
 | **College & Scholarship Database** | `src/components/CollegeListPanel.jsx`, `ScholarshipDatabase.jsx` | `src/lib/collegeRecommend.js`, `scholarshipResearch.js` | `src/data/scholarships.js`, `opportunities.js` | `scripts/verifyOpportunities.mjs`, `verifyMedicalScholarships.mjs` |
 | **Mock Voice Interview Simulator** | `src/components/LiveVoiceInterview.jsx`, `InterviewPrepPanel.jsx` | `src/lib/speech.js`, `interviewScore.js` | `src/data/interviewQuestions.js`, `mmiCasperQuestions.js` | `scripts/verifyInterviewRealism.mjs` |
@@ -218,6 +219,16 @@ Below is the complete, itemized inventory of **every single file in the reposito
 - `src/lib/onboardingFlow.js` — Shared application utility / service for onboardingFlow.
 - `src/lib/opportunityEligibility.js` — Shared application utility / service for opportunityEligibility.
 - `src/lib/opportunityMatch.js` — Shared application utility / service for opportunityMatch.
+- `src/lib/opportunity/index.js` — Barrel for the opportunity-intelligence layer.
+- `src/lib/opportunity/schema.js` — The unified opportunity record, its six data states (verified / AI-discovered / stale / incomplete / archived / next-cycle), and recurrence.
+- `src/lib/opportunity/adapt.js` — Adapters turning the browsable catalog, the structured programs and discovered rows into one record shape.
+- `src/lib/opportunity/context.js` — The student as the ranker sees them: profile, college list, school context, constraints, roadmap pressure, consent-gated location.
+- `src/lib/opportunity/ranking.js` — The twelve-dimension ranking model and the adaptive list-size (capacity) model.
+- `src/lib/opportunity/outcomes.js` — Realistic-success ladders per category; never targets first place.
+- `src/lib/opportunity/feedback.js` — The sixteen student actions, decaying suppression, and the generalized lessons they teach the ranker.
+- `src/lib/opportunity/discovery.js` — The AI opportunity-discovery workflow: prompt, sanitization, deduplication.
+- `src/lib/opportunity/store.js` — Persistence for discovered records and feedback events; the internal verification path.
+- `src/lib/opportunity/insights.js` — The card's answers, and every integration surface (roadmap, plans, dashboard, deadlines, Medabrain).
 - `src/lib/paceGoal.js` — Shared application utility / service for paceGoal.
 - `src/lib/parentApi.js` — Shared application utility / service for parentApi.
 - `src/lib/parentDigest.js` — Shared application utility / service for parentDigest.
@@ -629,6 +640,8 @@ Below is the complete, itemized inventory of **every single file in the reposito
 - `src/components/portfolio/MedabrainRead.jsx` — Portfolio Hub React UI component for MedabrainRead.
 - `src/components/portfolio/NextStepsCard.jsx` — Portfolio Hub React UI component for NextStepsCard.
 - `src/components/portfolio/OpportunitiesPanel.jsx` — Portfolio Hub React UI component for OpportunitiesPanel.
+- `src/components/portfolio/OpportunityFeed.jsx` — The adaptive opportunity feed: ranked matches, next-cycle, stretches, blocked, discovery and passed-on records.
+- `src/components/portfolio/OpportunityCard.jsx` — One opportunity as a card, answering all eleven required questions with its data state first.
 - `src/components/portfolio/ProgramExplorer.jsx` — Portfolio Hub React UI component for ProgramExplorer.
 - `src/components/portfolio/ProgramPromptsCard.jsx` — Portfolio Hub React UI component for ProgramPromptsCard.
 - `src/components/portfolio/ProgramTiers.jsx` — Portfolio Hub React UI component for ProgramTiers.
@@ -727,6 +740,9 @@ Below is the complete, itemized inventory of **every single file in the reposito
 - `supabase/migrations/0023_safety_events.sql` — Supabase database SQL migration file `0023_safety_events.sql`.
 - `supabase/migrations/0024_progress_sync_concurrency.sql` — Supabase database SQL migration file `0024_progress_sync_concurrency.sql`.
 - `supabase/migrations/0025_narrative_engine.sql` — Supabase database SQL migration file `0025_narrative_engine.sql`.
+- `supabase/migrations/0026_student_intelligence.sql` — Supabase database SQL migration file `0026_student_intelligence.sql`.
+- `supabase/migrations/0027_live_sync_version.sql` — Supabase database SQL migration file `0027_live_sync_version.sql`.
+- `supabase/migrations/0028_opportunity_intelligence.sql` — Discovered-opportunity inbox plus the widened recommendation-feedback vocabulary.
 
 
 ### 11. Automated Audit & Verification Scripts (scripts/...)
@@ -785,6 +801,7 @@ Below is the complete, itemized inventory of **every single file in the reposito
 - `scripts/verifyNavUnlocks.mjs` — Automated audit / verification script for verifyNavUnlocks.
 - `scripts/verifyNextThree.mjs` — Automated audit / verification script for verifyNextThree.
 - `scripts/verifyOpportunities.mjs` — Automated audit / verification script for verifyOpportunities.
+- `scripts/verifyOpportunityIntelligence.mjs` — Assertions for the opportunity-intelligence layer: data states, eligibility gates, adaptive sizing, feedback learning, discovery honesty.
 - `scripts/verifyOpportunityPrograms.mjs` — Automated audit / verification script for verifyOpportunityPrograms.
 - `scripts/verifyPaletteContrast.mjs` — Automated audit / verification script for verifyPaletteContrast.
 - `scripts/verifyParallelPathways.mjs` — Automated audit / verification script for verifyParallelPathways.

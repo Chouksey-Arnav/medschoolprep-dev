@@ -84,8 +84,20 @@ export const WRITABLE = {
   service_logs: ['entry_date', 'organization', 'cause_area', 'hours', 'role', 'description', 'impact_note', 'reflection', 'supporting_details'],
   competitions: ['title', 'level', 'category', 'result', 'placement', 'occurred_on', 'description', 'source'],
   checkins: ['week_key', 'raw_text', 'changes', 'source'],
-  recommendation_feedback: ['item_label', 'item_ref', 'status', 'note', 'source'],
+  // `action` and `item_category` arrived with 0028 so an opportunity card's exact button, and the
+  // category it was pressed on, survive alongside the coarser `status` the ranker groups by.
+  recommendation_feedback: ['item_label', 'item_ref', 'status', 'action', 'item_category', 'note', 'source'],
   activity_role_history: ['activity_id', 'role', 'started_at', 'ended_at', 'outcome', 'source'],
+  // ── The one deliberately asymmetric list in this file ────────────────────────────────────────
+  // `verified_at` is ABSENT, and its absence is the feature. A discovered opportunity is a lead
+  // an AI produced; the only thing that may turn it into a verified fact is a human check, and a
+  // student-facing endpoint that could write that column would make the whole "AI-discovered —
+  // needs verification" state cosmetic. `verification_state` IS writable (a student may re-open
+  // or reject one of their own rows, and the column's check constraint bounds the values), but
+  // without a date nothing downstream will ever read the row as freshly verified — see
+  // dataStateFor() in src/lib/opportunity/schema.js, which requires `verifiedAt` to leave the
+  // ai_discovered state.
+  discovered_opportunities: ['slug', 'name', 'org', 'url', 'category', 'verification_state', 'confidence', 'source_label', 'payload', 'archived_at', 'source'],
 };
 
 // Columns a client may set on CREATE but may never change afterward via PATCH — narrower than
@@ -134,6 +146,7 @@ export const TOUCHES_UPDATED_AT = new Set([
   'colleges', 'essays', 'research_experience', 'skills_certifications', 'clinical_hours', 'recommenders',
   'admission_intake', 'credential_suggestions', 'reflection_entries', 'narrative_profile',
   'school_context', 'constraints_profile', 'quick_notes', 'service_logs', 'competitions', 'recommendation_feedback',
+  'discovered_opportunities',
 ]);
 
 // Resources a client may create and delete but never edit. A MedEx seal is a record of what a

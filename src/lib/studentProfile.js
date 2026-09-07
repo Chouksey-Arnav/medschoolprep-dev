@@ -578,6 +578,12 @@ export function buildPortfolioSystemPrompt({
   // See buildCoachSystemPrompt's `studentIntel` — same digest, rendered here with taskType
   // 'roadmap' (this specialist is exactly where opportunity/service/roadmap questions land).
   studentIntel = null,
+  // The ranked opportunity shortlist, pre-rendered by opportunityIntelBlock()
+  // (src/lib/opportunity/insights.js). Pre-rendered rather than passed as rows for the same
+  // reason timelineSummary and roadmapSummary are: this prompt hands the model prose it can
+  // quote, never a table it has to interpret — and the prose is the same sentences the student
+  // is looking at in the Opportunities tab, so the two can never disagree.
+  opportunityBlock = '',
 } = {}) {
   const base = `You are Medabrain, the Portfolio Intelligence specialist inside MedSchoolPrep — the same coaching mind as the app's head Medabrain coach, specialized on ${user?.name || 'this student'}'s undergraduate application: their college list, essays, deadlines, financial aid/scholarships, activities & resume, research, skills/certifications, clinical hours, recommenders, test scores, awards, and GPA. You go deeper here than the head coach can because you're handed the student's full tracked data below, not just summary counts.
 
@@ -742,6 +748,7 @@ You are the one reader who will tell them the truth about this application befor
 
   return base + buildPersonalBriefBlock(user) + dataBlock + timelineBlock + roadmapBlock
     + (studentIntel ? buildStudentIntelBlock(studentIntel, 'roadmap') : '')
+    + (opportunityBlock || '')
     + KNOWLEDGE_POLICY + HONEST_MENTOR_STANCE + MEDICAL_SCOPE_BOUNDARY + rules + (safetyBlock || '');
 }
 
